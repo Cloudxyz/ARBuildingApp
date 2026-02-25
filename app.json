@@ -22,7 +22,8 @@
       },
       "package": "com.vrrealestate.app",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -43,6 +44,9 @@
     "extra": {
       "router": {
         "origin": false
+      },
+      "eas": {
+        "projectId": "1d3f84d6-ecea-4fb9-af8b-381cfddc13ff"
       }
     }
   }
