@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
-import { useLands } from '../../../src/hooks/useLands';
-import { useLandModel } from '../../../src/hooks/useLands';
+import { useLandModel, useLands } from '../../../src/hooks/useLands';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
@@ -31,7 +30,7 @@ function InfoRow({ label, value }: { label: string; value: string | number | nul
 export default function LandDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { lands, deleteLand } = useLands();
+  const { lands, loading: landsLoading, error: landsError, deleteLand } = useLands();
   const { model, loading: modelLoading } = useLandModel(id);
 
   const land = lands.find((l) => l.id === id);
@@ -48,12 +47,26 @@ export default function LandDetailScreen() {
         },
       },
     ]);
-  }, [land, id]);
+  }, [deleteLand, id, land?.name, router]);
+
+  if (landsLoading && !land) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={ACCENT} />
+      </View>
+    );
+  }
 
   if (!land) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={ACCENT} />
+        <Text style={styles.notFoundTitle}>Land not found</Text>
+        <Text style={styles.notFoundText}>
+          {landsError ?? 'This land may have been deleted or you do not have access.'}
+        </Text>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/(app)')}>
+          <Text style={styles.backBtnText}>BACK TO LIST</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -160,6 +173,29 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   content: { padding: 16, gap: 12, paddingBottom: 40 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: BG },
+  notFoundTitle: { color: '#eeeeff', fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  notFoundText: {
+    color: '#555577',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 24,
+    lineHeight: 18,
+  },
+  backBtn: {
+    borderWidth: 1,
+    borderColor: ACCENT,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  backBtnText: {
+    color: ACCENT,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    fontFamily: 'monospace',
+  },
   statusBanner: {
     flexDirection: 'row',
     justifyContent: 'space-between',

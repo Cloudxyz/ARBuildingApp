@@ -42,9 +42,10 @@ function generateParticles(count: number, width: number, height: number): Partic
 interface SingleParticleProps {
   config: ParticleConfig;
   active: boolean;
+  color: string;
 }
 
-const SingleParticle: React.FC<SingleParticleProps> = ({ config, active }) => {
+const SingleParticle: React.FC<SingleParticleProps> = ({ config, active, color }) => {
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(0);
 
@@ -88,6 +89,8 @@ const SingleParticle: React.FC<SingleParticleProps> = ({ config, active }) => {
           width: config.size,
           height: config.size,
           borderRadius: config.size / 2,
+          backgroundColor: color,
+          shadowColor: color,
         },
         style,
       ]}
@@ -121,7 +124,7 @@ export const FloatingParticles: React.FC<FloatingParticlesProps> = ({
   return (
     <View style={[styles.container, { width, height }]} pointerEvents="none">
       {particles.map((p) => (
-        <SingleParticle key={p.id} config={p} active={active} />
+        <SingleParticle key={p.id} config={p} active={active} color={color} />
       ))}
     </View>
   );
@@ -136,8 +139,6 @@ const styles = StyleSheet.create({
   },
   particle: {
     position: 'absolute',
-    backgroundColor: '#00d4ff',
-    shadowColor: '#00d4ff',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 4,

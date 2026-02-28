@@ -78,10 +78,13 @@ export function useLandModel(landId: string) {
 
   const fetchModel = useCallback(async () => {
     setLoading(true);
+    setError(null);
     const { data, error } = await supabase
       .from('land_models')
       .select('*')
       .eq('land_id', landId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (error) setError(error.message);
@@ -98,9 +101,22 @@ export function useLandModel(landId: string) {
     if (!user) return null;
 
     const payload = { ...input, land_id: landId, user_id: user.id };
+    const { data: existing, error: existingError } = await supabase
+      .from('land_models')
+      .select('id')
+      .eq('land_id', landId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const { data, error } = model
-      ? await supabase.from('land_models').update(payload).eq('id', model.id).select().single()
+    if (existingError) {
+      setError(existingError.message);
+      return null;
+    }
+
+    const modelId = existing?.id ?? model?.id ?? null;
+    const { data, error } = modelId
+      ? await supabase.from('land_models').update(payload).eq('id', modelId).select().single()
       : await supabase.from('land_models').insert(payload).select().single();
 
     if (error) {
