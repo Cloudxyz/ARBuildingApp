@@ -5,8 +5,11 @@ const config = getDefaultConfig(__dirname);
 // Reduce file watchers to avoid EMFILE errors on Windows
 config.watchFolders = [__dirname];
 
+// Avoid excluding first-level nested dependencies required by Expo/expo-three.
+// We only block very deep nested node_modules (3rd level and beyond), which
+// keeps watcher pressure lower without breaking Metro resolution in EAS builds.
 config.resolver.blockList = [
-  /node_modules\/.*\/node_modules\/.*/,
+  /node_modules[\\/][^\\/]+[\\/]node_modules[\\/][^\\/]+[\\/]node_modules[\\/].*/,
 ];
 
 // Disable package.json `exports` field resolution.
