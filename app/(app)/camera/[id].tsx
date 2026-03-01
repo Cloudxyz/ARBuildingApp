@@ -1,4 +1,27 @@
-import React, { useState, useCallback } from 'react';
+﻿/**
+ * app/(app)/camera/[id].tsx
+ *
+ * Unit AR Preview - same architecture as ARViewsDemoScreen but with:
+ *  - Live camera feed as background (blueprint + 3d modes)
+ *  - Unit-specific GLB model loaded in 3D view
+ *  - Config persisted via useARBuildingModel / Supabase
+ *
+ * Modes:
+ *  - blueprint  -> IsometricBlueprintView (solid dark background + blueprint grid)
+ *  - 3d         -> Building3DOverlay with unit model (solid dark background)
+ *  - magic3d    -> MagicCanvasMode (photo-to-3d, no camera feed)
+ *
+ * State rule: all mode trees stay mounted; only the active one is visible.
+ * Do NOT modify src/demo/ARViewsDemoScreen.tsx -- this is an independent copy.
+ */
+
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useMemo,
+} from 'react';
 import {
   View,
   Text,
@@ -7,377 +30,792 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
-  ScrollView,
+  LayoutChangeEvent,
   useWindowDimensions,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import {
   GestureHandlerRootView,
+  GestureDetector,
+  Gesture,
 } from 'react-native-gesture-handler';
-import { useLands } from '../../../src/hooks/useLands';
-import { BuildingAnimation } from '../../../src/components/BuildingAnimation';
+import { useSharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useUnitTypeModels, useUnits } from '../../../src/hooks/useUnits';
+import { IsometricBlueprintView } from '../../../src/components/IsometricBlueprintView';
 import { Building3DOverlay } from '../../../src/ar/Building3DOverlay';
+import MagicCanvasMode, {
+  type MagicBuildPanelState,
+} from '../../../src/magic/MagicCanvasMode';
 import { useARBuildingModel } from '../../../src/ar/useARBuildingModel';
-import { ARViewMode, BuildingType } from '../../../src/types';
+import { ARViewMode, UnitType } from '../../../src/types';
 
-// ── Constants ────────────────────────────────────────────────────────────────
-const ACCENT    = '#00d4ff';
-const BG        = '#070714';
-const CARD_BG   = 'rgba(7,7,20,0.92)';
-const BORDER    = '#1a1a3a';
-const GREEN     = '#00ff88';
+// -- Constants ----------------------------------------------------------------
+const ACCENT     = '#00d4ff';
+const BG         = '#070714';
+const BORDER     = '#1a1a3a';
+const GREEN      = '#00ff88';
+const FOOTER_GUARD = 64;
+const ANDROID_BOTTOM_INSET_FALLBACK = 36;
+const ZOOM_HOLD_DELAY_MS     = 140;
+const VIEW3D_FLOOR_BUILD_SEC = 0.8;
+const BLUEPRINT_FLOOR_BUILD_SEC = 0.7 / 6;
 
-const BUILDING_TYPES: BuildingType[] = ['residential', 'commercial', 'industrial', 'mixed'];
+const LAND_PREVIEW_TYPES: Array<Exclude<UnitType, 'land'>> = [
+  'house',
+  'building',
+  'commercial',
+];
 
-// ── Screen ───────────────────────────────────────────────────────────────────
-export default function CameraARScreen() {
+// -- Screen -------------------------------------------------------------------
+export default function UnitARPreviewScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { lands } = useLands();
-  const land = lands.find((l) => l.id === id);
+  const { units } = useUnits();
+  const unit = units.find((u) => u.id === id);
 
-  const [permission, requestPermission] = useCameraPermissions();
+  const {
+    modelsByType: unitTypeModels,
+    loading: unitTypeModelsLoading,
+    error: unitTypeModelsError,
+  } = useUnitTypeModels();
 
-  // Shared building state
-  const ar = useARBuildingModel(id);
+  const [landPreviewType, setLandPreviewType] =
+    useState<Exclude<UnitType, 'land'>>('house');
+  const selectedLandTypeModel = unitTypeModels[landPreviewType];
 
-  // View mode — local only, does not affect land/nav state
-  const [viewMode, setViewMode] = useState<ARViewMode>('blueprint');
+  // Resolve model URI: land units use type-model, others use their own model
+  const resolvedModelUri = useMemo(() => {
+    if (!unit) return null;
+    if (unit.unit_type === 'land') {
+      return (
+        selectedLandTypeModel?.model_glb_url ??
+        selectedLandTypeModel?.external_model_glb_url ??
+        unit.model_glb_url ??
+        null
+      );
+    }
+    return unit.model_glb_url ?? null;
+  }, [selectedLandTypeModel, unit]);
 
-  const { width: winW, height: winH } = useWindowDimensions();
-  const cameraH = Math.round(winH * 0.57);
+  // -- Layout -----------------------------------------------------------------
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [contentHeight, setContentHeight] = useState(height);
 
-  // Switch views cleanly — preserves config, restarts animation
-  const switchMode = useCallback(
-    (mode: ARViewMode) => {
-      if (mode === viewMode) return;
-      ar.stop();
-      setViewMode(mode);
-    },
-    [viewMode, ar]
+  const effectiveBottomInset = Math.max(
+    insets.bottom,
+    Platform.OS === 'android' ? ANDROID_BOTTOM_INSET_FALLBACK : 0,
   );
+  const panelBottomPadding = 24 + effectiveBottomInset + FOOTER_GUARD;
+  const minPanelSpace   = 240 + panelBottomPadding;
+  const maxPreviewH     = Math.max(220, contentHeight - minPanelSpace);
+  const desiredPreviewH = Math.round(contentHeight * 0.5);
+  const previewH        = Math.min(desiredPreviewH, maxPreviewH);
+  const magicPreviewH   = Math.round(height * 0.55);
+
+  const onRootLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > 0) setContentHeight(h);
+  }, []);
+
+  // -- View mode --------------------------------------------------------------
+  const [viewMode, setViewMode] = useState<ARViewMode>('blueprint');
+  const isMagicMode = viewMode === 'magic3d';
+
+  // -- Shared AR config (persisted via Supabase) ------------------------------
+  const ar = useARBuildingModel(id);
+  const { config, updateConfig, isSaving } = ar;
 
   const handleSave = async () => {
     const ok = await ar.save();
-    if (ok) {
-      Alert.alert('Saved', 'Building configuration saved.');
-    } else {
-      Alert.alert('Error', 'Failed to save. Check your connection.');
-    }
+    if (ok) Alert.alert('Saved', 'Building configuration saved.');
+    else    Alert.alert('Error', 'Failed to save. Check your connection.');
   };
 
-  // ── Permission gates ─────────────────────────────────────────────────────
-  if (!permission) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator color={ACCENT} />
-      </View>
-    );
-  }
-  if (!permission.granted) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.permText}>Camera access is required for the AR preview.</Text>
-        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>GRANT CAMERA PERMISSION</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // -- Blueprint state --------------------------------------------------------
+  const [blueprintIsPlaying, setBlueprintIsPlaying] = useState(false);
+  const [blueprintAnimKey,   setBlueprintAnimKey]   = useState(0);
+  const [blueprintCompleted, setBlueprintCompleted] = useState(false);
+  const blueprintCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const {
-    config, updateConfig, isPlaying, phase, animKey,
-    play, stop, isSaving,
-  } = ar;
+  // -- 3D state ---------------------------------------------------------------
+  const [view3dIsPlaying,   setView3dIsPlaying]   = useState(false);
+  const [view3dAnimKey,     setView3dAnimKey]     = useState(0);
+  const [view3dCompleted,   setView3dCompleted]   = useState(false);
+  const [view3dZoomCmdId,   setView3dZoomCmdId]   = useState(0);
+  const [view3dZoomCmdDir,  setView3dZoomCmdDir]  = useState<'in' | 'out'>('in');
+  const [view3dZoomHoldDir, setView3dZoomHoldDir] = useState<-1 | 0 | 1>(0);
+  const [view3dZoomUi,      setView3dZoomUi]      = useState(1.0);
+  const [view3dCanZoomIn,   setView3dCanZoomIn]   = useState(true);
+  const [view3dCanZoomOut,  setView3dCanZoomOut]  = useState(true);
+  const view3dCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomHoldTimerRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomHoldStartedRef     = useRef(false);
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // -- Magic3D state ----------------------------------------------------------
+  const [magicPlayCmdId,     setMagicPlayCmdId]     = useState(0);
+  const [magicStopCmdId,     setMagicStopCmdId]     = useState(0);
+  const [magicIncFloorCmdId, setMagicIncFloorCmdId] = useState(0);
+  const [magicDecFloorCmdId, setMagicDecFloorCmdId] = useState(0);
+  const [magicZoomCmdId,     setMagicZoomCmdId]     = useState(0);
+  const [magicZoomCmdDir,    setMagicZoomCmdDir]    = useState<'in' | 'out'>('in');
+  const [magicZoomHoldDir,   setMagicZoomHoldDir]   = useState<-1 | 0 | 1>(0);
+  const [magicBuildState,    setMagicBuildState]    = useState<MagicBuildPanelState>({
+    phase: 'pick', isPlaying: false, floorCount: 5,
+    zoomValue: 1, canZoomIn: true, canZoomOut: true,
+  });
+  const magicZoomHoldTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const magicZoomHoldStartedRef = useRef(false);
+
+  // -- Gesture layer (blueprint + 3d) ----------------------------------------
+  const gestureScale    = useSharedValue(1);
+  const savedScale      = useSharedValue(1);
+  const gestureRotation = useSharedValue(0);
+  const savedRotation   = useSharedValue(0);
+  const offsetX         = useSharedValue(0);
+  const savedOffsetX    = useSharedValue(0);
+  const offsetY         = useSharedValue(0);
+  const savedOffsetY    = useSharedValue(0);
+
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      gestureScale.value = Math.min(4, Math.max(0.25, savedScale.value * e.scale));
+    })
+    .onEnd(() => { savedScale.value = gestureScale.value; });
+
+  const rotate = Gesture.Rotation()
+    .onUpdate((e) => {
+      gestureRotation.value = savedRotation.value + (e.rotation * 180) / Math.PI;
+    })
+    .onEnd(() => { savedRotation.value = gestureRotation.value; });
+
+  const panG = Gesture.Pan()
+    .minPointers(1).maxPointers(1)
+    .onUpdate((e) => {
+      offsetX.value = savedOffsetX.value + e.translationX;
+      offsetY.value = savedOffsetY.value + e.translationY;
+    })
+    .onEnd(() => {
+      savedOffsetX.value = offsetX.value;
+      savedOffsetY.value = offsetY.value;
+    });
+
+  const composedGesture = Gesture.Simultaneous(pinch, rotate, panG);
+
+  // -- Mode switch ------------------------------------------------------------
+  const switchMode = useCallback((mode: ARViewMode) => {
+    if (mode === viewMode) return;
+    if (mode !== '3d')      setView3dZoomHoldDir(0);
+    if (mode !== 'magic3d') setMagicZoomHoldDir(0);
+    setViewMode(mode);
+  }, [viewMode]);
+
+  // -- Play / Stop ------------------------------------------------------------
+  const handlePlay = useCallback(() => {
+    if (viewMode === 'blueprint') {
+      if (blueprintCompleteTimerRef.current) {
+        clearTimeout(blueprintCompleteTimerRef.current);
+        blueprintCompleteTimerRef.current = null;
+      }
+      setBlueprintCompleted(false);
+      setBlueprintAnimKey((k) => k + 1);
+      setBlueprintIsPlaying(true);
+      const ms = Math.max(1, config.floorCount) * BLUEPRINT_FLOOR_BUILD_SEC * 1000;
+      blueprintCompleteTimerRef.current = setTimeout(() => {
+        setBlueprintCompleted(true);
+        setBlueprintIsPlaying(false);
+      }, ms + 40);
+      return;
+    }
+    if (viewMode === '3d') {
+      if (view3dCompleteTimerRef.current) {
+        clearTimeout(view3dCompleteTimerRef.current);
+        view3dCompleteTimerRef.current = null;
+      }
+      setView3dCompleted(false);
+      setView3dAnimKey((k) => k + 1);
+      setView3dIsPlaying(true);
+      const floors = Math.max(1, Math.min(20, config.floorCount));
+      const sec = (floors * VIEW3D_FLOOR_BUILD_SEC) / Math.max(0.1, config.buildSpeed);
+      view3dCompleteTimerRef.current = setTimeout(() => {
+        setView3dCompleted(true);
+        setView3dIsPlaying(false);
+      }, sec * 1000 + 40);
+    }
+  }, [viewMode, config.floorCount, config.buildSpeed]);
+
+  const handleStop = useCallback(() => {
+    if (viewMode === 'blueprint') {
+      if (blueprintCompleteTimerRef.current) {
+        clearTimeout(blueprintCompleteTimerRef.current);
+        blueprintCompleteTimerRef.current = null;
+      }
+      setBlueprintIsPlaying(false);
+      setBlueprintCompleted(false);
+      return;
+    }
+    if (viewMode === '3d') {
+      if (view3dCompleteTimerRef.current) {
+        clearTimeout(view3dCompleteTimerRef.current);
+        view3dCompleteTimerRef.current = null;
+      }
+      setView3dIsPlaying(false);
+      setView3dCompleted(false);
+    }
+  }, [viewMode]);
+
+  const handleBlueprintBuildComplete = useCallback(() => {
+    if (blueprintCompleteTimerRef.current) {
+      clearTimeout(blueprintCompleteTimerRef.current);
+      blueprintCompleteTimerRef.current = null;
+    }
+    setBlueprintCompleted(true);
+    setBlueprintIsPlaying(false);
+  }, []);
+
+  const handle3dBuildComplete = useCallback(() => {
+    if (view3dCompleteTimerRef.current) {
+      clearTimeout(view3dCompleteTimerRef.current);
+      view3dCompleteTimerRef.current = null;
+    }
+    setView3dCompleted(true);
+    setView3dIsPlaying(false);
+  }, []);
+
+  // -- 3D zoom controls -------------------------------------------------------
+  const handleZoomIn = useCallback(() => {
+    if (!view3dCanZoomIn) return;
+    setView3dZoomCmdDir('in');
+    setView3dZoomCmdId((k) => k + 1);
+  }, [view3dCanZoomIn]);
+
+  const handleZoomOut = useCallback(() => {
+    if (!view3dCanZoomOut) return;
+    setView3dZoomCmdDir('out');
+    setView3dZoomCmdId((k) => k + 1);
+  }, [view3dCanZoomOut]);
+
+  const startZoomHold = useCallback((dir: -1 | 1) => {
+    if ((dir === 1 && !view3dCanZoomIn) || (dir === -1 && !view3dCanZoomOut)) return;
+    zoomHoldStartedRef.current = false;
+    if (zoomHoldTimerRef.current) { clearTimeout(zoomHoldTimerRef.current); zoomHoldTimerRef.current = null; }
+    zoomHoldTimerRef.current = setTimeout(() => {
+      zoomHoldStartedRef.current = true;
+      setView3dZoomHoldDir(dir);
+    }, ZOOM_HOLD_DELAY_MS);
+  }, [view3dCanZoomIn, view3dCanZoomOut]);
+
+  const stopZoomHold = useCallback(() => {
+    if (zoomHoldTimerRef.current) { clearTimeout(zoomHoldTimerRef.current); zoomHoldTimerRef.current = null; }
+    setView3dZoomHoldDir(0);
+  }, []);
+
+  const handleZoomTap = useCallback((dir: -1 | 1) => {
+    if (zoomHoldStartedRef.current) { zoomHoldStartedRef.current = false; return; }
+    if (dir === -1) handleZoomOut(); else handleZoomIn();
+  }, [handleZoomIn, handleZoomOut]);
+
+  useEffect(() => {
+    if      (view3dZoomHoldDir === 1  && !view3dCanZoomIn)  setView3dZoomHoldDir(0);
+    else if (view3dZoomHoldDir === -1 && !view3dCanZoomOut) setView3dZoomHoldDir(0);
+  }, [view3dZoomHoldDir, view3dCanZoomIn, view3dCanZoomOut]);
+
+  const handle3dZoomMetrics = useCallback(
+    (m: { zoomValue: number; canZoomIn: boolean; canZoomOut: boolean }) => {
+      setView3dZoomUi(+m.zoomValue.toFixed(1));
+      setView3dCanZoomIn(m.canZoomIn);
+      setView3dCanZoomOut(m.canZoomOut);
+    },
+    [],
+  );
+
+  // -- Magic3D controls -------------------------------------------------------
+  const handleMagicBuildState = useCallback(
+    (state: MagicBuildPanelState) => setMagicBuildState(state),
+    [],
+  );
+
+  const handleMagicPlay = useCallback(() => {
+    if (magicBuildState.phase !== 'build3d') return;
+    setMagicPlayCmdId((k) => k + 1);
+  }, [magicBuildState.phase]);
+
+  const handleMagicStop = useCallback(() => {
+    setMagicStopCmdId((k) => k + 1);
+  }, []);
+
+  const handleMagicFloorDec = useCallback(() => {
+    if (magicBuildState.phase !== 'build3d') return;
+    setMagicDecFloorCmdId((k) => k + 1);
+  }, [magicBuildState.phase]);
+
+  const handleMagicFloorInc = useCallback(() => {
+    if (magicBuildState.phase !== 'build3d') return;
+    setMagicIncFloorCmdId((k) => k + 1);
+  }, [magicBuildState.phase]);
+
+  const handleMagicZoomIn = useCallback(() => {
+    if (!magicBuildState.canZoomIn || magicBuildState.phase !== 'build3d') return;
+    setMagicZoomCmdDir('in');
+    setMagicZoomCmdId((k) => k + 1);
+  }, [magicBuildState.canZoomIn, magicBuildState.phase]);
+
+  const handleMagicZoomOut = useCallback(() => {
+    if (!magicBuildState.canZoomOut || magicBuildState.phase !== 'build3d') return;
+    setMagicZoomCmdDir('out');
+    setMagicZoomCmdId((k) => k + 1);
+  }, [magicBuildState.canZoomOut, magicBuildState.phase]);
+
+  const startMagicZoomHold = useCallback((dir: -1 | 1) => {
+    if (magicBuildState.phase !== 'build3d') return;
+    if ((dir === 1 && !magicBuildState.canZoomIn) || (dir === -1 && !magicBuildState.canZoomOut)) return;
+    magicZoomHoldStartedRef.current = false;
+    if (magicZoomHoldTimerRef.current) {
+      clearTimeout(magicZoomHoldTimerRef.current);
+      magicZoomHoldTimerRef.current = null;
+    }
+    magicZoomHoldTimerRef.current = setTimeout(() => {
+      magicZoomHoldStartedRef.current = true;
+      setMagicZoomHoldDir(dir);
+    }, ZOOM_HOLD_DELAY_MS);
+  }, [magicBuildState.canZoomIn, magicBuildState.canZoomOut, magicBuildState.phase]);
+
+  const stopMagicZoomHold = useCallback(() => {
+    if (magicZoomHoldTimerRef.current) {
+      clearTimeout(magicZoomHoldTimerRef.current);
+      magicZoomHoldTimerRef.current = null;
+    }
+    setMagicZoomHoldDir(0);
+  }, []);
+
+  const handleMagicZoomTap = useCallback((dir: -1 | 1) => {
+    if (magicZoomHoldStartedRef.current) { magicZoomHoldStartedRef.current = false; return; }
+    if (dir === -1) handleMagicZoomOut(); else handleMagicZoomIn();
+  }, [handleMagicZoomIn, handleMagicZoomOut]);
+
+  useEffect(() => {
+    if      (magicZoomHoldDir === 1  && !magicBuildState.canZoomIn)  setMagicZoomHoldDir(0);
+    else if (magicZoomHoldDir === -1 && !magicBuildState.canZoomOut) setMagicZoomHoldDir(0);
+  }, [magicZoomHoldDir, magicBuildState.canZoomIn, magicBuildState.canZoomOut]);
+
+  // -- Cleanup timers ---------------------------------------------------------
+  useEffect(() => () => {
+    [
+      zoomHoldTimerRef, magicZoomHoldTimerRef,
+      blueprintCompleteTimerRef, view3dCompleteTimerRef,
+    ].forEach((r) => { if (r.current) clearTimeout(r.current); });
+  }, []);
+
+  // -- Derived play state -----------------------------------------------------
+  const panelIsPlaying = viewMode === '3d'
+    ? (view3dIsPlaying && !view3dCompleted)
+    : (blueprintIsPlaying && !blueprintCompleted);
+  const magicPanelIsPlaying = magicBuildState.isPlaying;
+
+  // -- Render -----------------------------------------------------------------
   return (
     <>
       <Stack.Screen
         options={{
-          title: land?.name ?? 'AR Preview',
+          title: unit?.name ?? 'AR Preview',
           headerTransparent: true,
           headerTintColor: ACCENT,
         }}
       />
 
-      <GestureHandlerRootView style={styles.root}>
-        {/* Camera + AR Overlay */}
-        <CameraView style={[styles.camera, { height: cameraH }]} facing="back">
-            {/* Blueprint (2D) mode — no gesture detector around it */}
-            {viewMode === 'blueprint' && (
-              <BuildingAnimation
-                key={`bp-${animKey}`}
-                config={{
-                  floorCount: config.floorCount,
-                  scale: config.scale,
-                  rotationDeg: config.rotationDeg,
-                  buildingType: config.buildingType,
-                  footprintW: config.footprintW,
-                  footprintH: config.footprintH,
-                  colorScheme: config.colorScheme,
-                }}
-                active={isPlaying}
-                onPhaseChange={ar.setPhase}
-              />
-            )}
+      <GestureHandlerRootView style={styles.root} onLayout={onRootLayout}>
 
-            {/* 3D mode — all gestures handled internally via PanResponder */}
-            {viewMode === '3d' && (
-              <Building3DOverlay
-                key={`3d-${animKey}`}
-                config={config}
-                isPlaying={isPlaying}
-                animKey={animKey}
-                width={winW}
-                height={cameraH}
-              />
-            )}
-
-            {/* HUD */}
-            <View style={styles.hud}>
-              <View>
-                <Text style={styles.hudTitle}>
-                  ⬡ {land?.name?.toUpperCase() ?? 'LAND'} · AR MODE
-                </Text>
-                <Text style={styles.hudPhase}>
-                  {['STANDBY', 'SCANNING…', 'BUILDING…', 'PARTICLES…'][phase] ?? 'LIVE'}
-                </Text>
-              </View>
-
-              {/* View mode toggle */}
-              <View style={styles.modeToggle}>
+        {/* Mode pill */}
+        <View style={styles.togglePillBar}>
+          <View style={styles.togglePill} pointerEvents="box-none">
+            {(['blueprint', '3d', 'magic3d'] as ARViewMode[]).map((m) => {
+              const active = viewMode === m;
+              const isMagic = m === 'magic3d';
+              const label = m === 'blueprint' ? 'BLUEPRINT' : m === '3d' ? '3D VIEW' : '3D MAGIC';
+              return (
                 <TouchableOpacity
-                  style={[styles.modeBtn, viewMode === 'blueprint' && styles.modeBtnActive]}
-                  onPress={() => switchMode('blueprint')}
+                  key={m}
+                  style={[
+                    styles.pillBtn,
+                    active && (isMagic ? styles.pillBtnMagicActive : styles.pillBtnActive),
+                  ]}
+                  onPress={() => switchMode(m)}
                 >
-                  <Text style={[styles.modeBtnText, viewMode === 'blueprint' && styles.modeBtnTextActive]}>
-                    2D
+                  <Text
+                    style={[
+                      styles.pillBtnText,
+                      active && (isMagic ? styles.pillBtnMagicText : styles.pillBtnTextActive),
+                    ]}
+                  >
+                    {label}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modeBtn, viewMode === '3d' && styles.modeBtnActive]}
-                  onPress={() => switchMode('3d')}
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Preview area */}
+        <View style={[styles.preview, { height: isMagicMode ? magicPreviewH : previewH }]}>
+
+          {/* Magic3D layer */}
+          <View
+            style={[StyleSheet.absoluteFill, !isMagicMode && styles.hiddenLayer]}
+            pointerEvents={isMagicMode ? 'auto' : 'none'}
+          >
+            <MagicCanvasMode
+              width={width}
+              height={magicPreviewH}
+              active={isMagicMode}
+              showBuildToolbar={true}
+              playCommandId={magicPlayCmdId}
+              stopCommandId={magicStopCmdId}
+              incFloorCommandId={magicIncFloorCmdId}
+              decFloorCommandId={magicDecFloorCmdId}
+              externalZoomCommandId={magicZoomCmdId}
+              externalZoomCommandDir={magicZoomCmdDir}
+              externalZoomHoldDir={magicZoomHoldDir}
+              onBuildStateChange={handleMagicBuildState}
+            />
+          </View>
+
+          {/* Blueprint + 3D layers (solid background — same as Demo) */}
+          <View
+            style={[StyleSheet.absoluteFill, isMagicMode && styles.hiddenLayer]}
+            pointerEvents={isMagicMode ? 'none' : 'auto'}
+          >
+            <GestureDetector gesture={composedGesture}>
+              <View style={StyleSheet.absoluteFill}>
+
+                {/* Blueprint */}
+                <View
+                  style={[StyleSheet.absoluteFill, viewMode !== 'blueprint' && styles.hiddenLayer]}
+                  pointerEvents={viewMode === 'blueprint' ? 'auto' : 'none'}
                 >
-                  <Text style={[styles.modeBtnText, viewMode === '3d' && styles.modeBtnTextActive]}>
-                    3D
-                  </Text>
-                </TouchableOpacity>
+                  <IsometricBlueprintView
+                    key={`unit-bp-${id}-${config.floorCount}-${config.footprintW}-${config.footprintH}`}
+                    config={{
+                      floorCount:   config.floorCount,
+                      scale:        config.scale,
+                      rotationDeg:  config.rotationDeg,
+                      buildingType: config.buildingType,
+                      footprintW:   config.footprintW,
+                      footprintH:   config.footprintH,
+                      colorScheme:  config.colorScheme,
+                    }}
+                    active={blueprintIsPlaying || blueprintCompleted}
+                    animKey={blueprintAnimKey}
+                    containerWidth={width}
+                    containerHeight={previewH}
+                    onBuildComplete={handleBlueprintBuildComplete}
+                  />
+                </View>
+
+                {/* 3D + unit model */}
+                <View
+                  style={[StyleSheet.absoluteFill, viewMode !== '3d' && styles.hiddenLayer]}
+                  pointerEvents={viewMode === '3d' ? 'auto' : 'none'}
+                >
+                  <Building3DOverlay
+                    key={`unit-3d-${id}-${unit?.unit_type ?? 'na'}-${landPreviewType}-${resolvedModelUri ?? 'default'}`}
+                    config={config}
+                    isPlaying={view3dIsPlaying}
+                    animKey={view3dAnimKey}
+                    modelUri={resolvedModelUri}
+                    active={viewMode === '3d'}
+                    width={width}
+                    height={previewH}
+                    zoomCommandId={view3dZoomCmdId}
+                    zoomCommandDir={view3dZoomCmdDir}
+                    zoomHoldDir={view3dZoomHoldDir}
+                    onZoomMetrics={handle3dZoomMetrics}
+                    onBuildComplete={handle3dBuildComplete}
+                  />
+                </View>
+
               </View>
-            </View>
-          </CameraView>
+            </GestureDetector>
+          </View>
+        </View>
+
+        {/* Label badge */}
+        <View style={styles.labelBadge} pointerEvents="none">
+          <Text style={styles.labelText}>
+            {isMagicMode
+              ? 'MAGIC - PHOTO to 3D'
+              : `${unit?.name?.toUpperCase() ?? 'UNIT'} - AR PREVIEW`}
+          </Text>
+        </View>
 
         {/* Controls panel */}
-        <ScrollView
-          style={styles.panel}
-          contentContainerStyle={styles.panelContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Play / Stop & Save */}
-          <View style={styles.playRow}>
+        <View style={[styles.panel, { paddingBottom: panelBottomPadding }]}>
+
+          {/* Play / Stop + Save */}
+          <View style={styles.row}>
             <TouchableOpacity
-              style={[styles.playBtn, isPlaying && styles.stopBtn]}
-              onPress={isPlaying ? stop : play}
+              style={[
+                styles.playBtn,
+                (isMagicMode ? magicPanelIsPlaying : panelIsPlaying) && styles.stopBtn,
+                isMagicMode && magicBuildState.phase !== 'build3d' && styles.playBtnDisabled,
+              ]}
+              onPress={
+                isMagicMode
+                  ? (magicPanelIsPlaying ? handleMagicStop : handleMagicPlay)
+                  : (panelIsPlaying      ? handleStop      : handlePlay)
+              }
+              disabled={isMagicMode && magicBuildState.phase !== 'build3d'}
             >
-              <Text style={[styles.playBtnText, isPlaying && { color: '#ff4444' }]}>
-                {isPlaying ? '■ STOP' : '▶ START'}
+              <Text
+                style={[
+                  styles.playBtnText,
+                  (isMagicMode ? magicPanelIsPlaying : panelIsPlaying) && { color: '#ff4444' },
+                ]}
+              >
+                {(isMagicMode ? magicPanelIsPlaying : panelIsPlaying) ? 'STOP' : 'PLAY'}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.saveBtn, isSaving && styles.btnDisabled]}
-              onPress={handleSave}
-              disabled={isSaving}
-            >
-              {isSaving ? (
-                <ActivityIndicator color={GREEN} size="small" />
-              ) : (
-                <Text style={styles.saveBtnText}>SAVE</Text>
-              )}
-            </TouchableOpacity>
+
+            {!isMagicMode && (
+              <TouchableOpacity
+                style={[styles.saveBtn, isSaving && styles.btnDisabled]}
+                onPress={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving
+                  ? <ActivityIndicator color={GREEN} size="small" />
+                  : <Text style={styles.saveBtnText}>SAVE</Text>}
+              </TouchableOpacity>
+            )}
           </View>
+
+          {/* Land type selector */}
+          {!isMagicMode && unit?.unit_type === 'land' && (
+            <ControlRow label="LAND TYPE">
+              <View style={styles.chipRow}>
+                {LAND_PREVIEW_TYPES.map((t) => (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.typeChip, landPreviewType === t && styles.typeChipActive]}
+                    onPress={() => setLandPreviewType(t)}
+                  >
+                    <Text
+                      style={[
+                        styles.typeChipText,
+                        landPreviewType === t && { color: ACCENT },
+                      ]}
+                    >
+                      {t.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ControlRow>
+          )}
 
           {/* Floors */}
-          <View style={styles.controlRow}>
-            <Text style={styles.controlLabel}>FLOORS</Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                style={styles.stepBtn}
-                onPress={() => updateConfig('floorCount', Math.max(1, config.floorCount - 1))}
-              >
-                <Text style={styles.stepBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.stepValue}>{config.floorCount}</Text>
-              <TouchableOpacity
-                style={styles.stepBtn}
-                onPress={() => updateConfig('floorCount', Math.min(20, config.floorCount + 1))}
-              >
-                <Text style={styles.stepBtnText}>+</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <ControlRow label="FLOORS">
+            <Stepper
+              value={isMagicMode ? magicBuildState.floorCount : config.floorCount}
+              onDec={
+                isMagicMode
+                  ? handleMagicFloorDec
+                  : () => updateConfig('floorCount', Math.max(1, config.floorCount - 1))
+              }
+              onInc={
+                isMagicMode
+                  ? handleMagicFloorInc
+                  : () => updateConfig('floorCount', Math.min(20, config.floorCount + 1))
+              }
+            />
+          </ControlRow>
 
-          {/* Footprint W */}
-          <View style={styles.controlRow}>
-            <Text style={styles.controlLabel}>FOOTPRINT W</Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                style={styles.stepBtn}
-                onPress={() => updateConfig('footprintW', Math.max(60, config.footprintW - 10))}
-              >
-                <Text style={styles.stepBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.stepValue}>{config.footprintW}</Text>
-              <TouchableOpacity
-                style={styles.stepBtn}
-                onPress={() => updateConfig('footprintW', Math.min(280, config.footprintW + 10))}
-              >
-                <Text style={styles.stepBtnText}>+</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Build speed */}
-          <View style={styles.controlRow}>
-            <Text style={styles.controlLabel}>SPEED</Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                style={styles.stepBtn}
-                onPress={() =>
-                  updateConfig('buildSpeed', Math.max(0.25, +(config.buildSpeed - 0.25).toFixed(2)))
+          {/* Zoom (3d + magic3d only) */}
+          {(viewMode === '3d' || isMagicMode) && (
+            <ControlRow label="ZOOM">
+              <Stepper
+                value={
+                  isMagicMode
+                    ? `${magicBuildState.zoomValue.toFixed(1)}x`
+                    : `${view3dZoomUi.toFixed(1)}x`
                 }
-              >
-                <Text style={styles.stepBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.stepValue}>{config.buildSpeed.toFixed(2)}×</Text>
-              <TouchableOpacity
-                style={styles.stepBtn}
-                onPress={() =>
-                  updateConfig('buildSpeed', Math.min(4, +(config.buildSpeed + 0.25).toFixed(2)))
-                }
-              >
-                <Text style={styles.stepBtnText}>+</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                onDec={isMagicMode ? () => handleMagicZoomTap(-1) : () => handleZoomTap(-1)}
+                onInc={isMagicMode ? () => handleMagicZoomTap(1)  : () => handleZoomTap(1)}
+                onDecPressIn={isMagicMode  ? () => startMagicZoomHold(-1) : () => startZoomHold(-1)}
+                onDecPressOut={isMagicMode ? stopMagicZoomHold              : stopZoomHold}
+                onIncPressIn={isMagicMode  ? () => startMagicZoomHold(1)  : () => startZoomHold(1)}
+                onIncPressOut={isMagicMode ? stopMagicZoomHold              : stopZoomHold}
+              />
+            </ControlRow>
+          )}
 
-          {/* Building type */}
-          <View style={styles.controlCol}>
-            <Text style={styles.controlLabel}>TYPE</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-              {BUILDING_TYPES.map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.typeChip, config.buildingType === t && styles.typeChipActive]}
-                  onPress={() => updateConfig('buildingType', t)}
-                >
-                  <Text style={[styles.typeChipText, config.buildingType === t && { color: ACCENT }]}>
-                    {t.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Colour scheme */}
-          <View style={styles.controlCol}>
-            <Text style={styles.controlLabel}>COLOUR</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-              {(['blueprint', 'warm', 'neon'] as const).map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  style={[styles.typeChip, config.colorScheme === s && styles.typeChipActive]}
-                  onPress={() => updateConfig('colorScheme', s)}
-                >
-                  <Text style={[styles.typeChipText, config.colorScheme === s && { color: ACCENT }]}>
-                    {s.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          <Text style={styles.gestureHint}>
-            Pinch to scale · Two-finger rotate · Drag to offset
+          <Text style={styles.hint}>
+            {isMagicMode
+              ? (magicBuildState.phase === 'build3d'
+                ? 'Pinch / Rotate / Drag active on preview'
+                : 'Generate 3D in Magic to unlock Play / Floors / Zoom')
+              : 'Pinch / Rotate / Drag active on preview'}
           </Text>
-        </ScrollView>
+        </View>
+
       </GestureHandlerRootView>
     </>
   );
 }
 
-// ── Styles ───────────────────────────────────────────────────────────────────
+// -- Sub-components -----------------------------------------------------------
+const ControlRow: React.FC<{ label: string; children: React.ReactNode }> = ({
+  label,
+  children,
+}) => (
+  <View style={styles.controlRow}>
+    <Text style={styles.label}>{label}</Text>
+    {children}
+  </View>
+);
+
+interface StepperProps {
+  value: number | string;
+  onDec: () => void;
+  onInc: () => void;
+  onDecPressIn?:  () => void;
+  onDecPressOut?: () => void;
+  onIncPressIn?:  () => void;
+  onIncPressOut?: () => void;
+}
+
+const Stepper: React.FC<StepperProps> = ({
+  value,
+  onDec,
+  onInc,
+  onDecPressIn,
+  onDecPressOut,
+  onIncPressIn,
+  onIncPressOut,
+}) => (
+  <View style={styles.stepper}>
+    <TouchableOpacity
+      style={styles.stepBtn}
+      onPress={onDec}
+      onPressIn={onDecPressIn}
+      onPressOut={onDecPressOut}
+    >
+      <Text style={styles.stepBtnText}>-</Text>
+    </TouchableOpacity>
+    <Text style={styles.stepValue}>{value}</Text>
+    <TouchableOpacity
+      style={styles.stepBtn}
+      onPress={onInc}
+      onPressIn={onIncPressIn}
+      onPressOut={onIncPressOut}
+    >
+      <Text style={styles.stepBtnText}>+</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+// -- Styles -------------------------------------------------------------------
 const styles = StyleSheet.create({
   root:     { flex: 1, backgroundColor: BG },
-  camera:   { width: '100%' },
-  centered: { flex: 1, backgroundColor: BG, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  permText: { color: '#eeeeff', fontSize: 15, textAlign: 'center', marginBottom: 20 },
-  permBtn:  { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 24, paddingVertical: 14 },
-  permBtnText: { color: BG, fontWeight: '800', fontSize: 13, letterSpacing: 2 },
-
-  hud: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 100 : 70,
-    left: 16, right: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+  togglePillBar: {
+    width: '100%', alignItems: 'center', paddingVertical: 8,
+    backgroundColor: BG, borderBottomWidth: 1, borderBottomColor: BORDER,
+    paddingTop: Platform.OS === 'ios' ? 100 : 70,
   },
-  hudTitle: { color: ACCENT, fontSize: 10, fontFamily: 'monospace', letterSpacing: 1.5 },
-  hudPhase: { color: '#ffe044', fontSize: 9, fontFamily: 'monospace', letterSpacing: 2, marginTop: 2 },
-
-  modeToggle: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 6,
-    borderWidth: 1, borderColor: BORDER,
-    overflow: 'hidden',
+  togglePill: {
+    flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 8, borderWidth: 1, borderColor: BORDER, overflow: 'hidden',
   },
-  modeBtn:         { paddingHorizontal: 14, paddingVertical: 7 },
-  modeBtnActive:   { backgroundColor: ACCENT },
-  modeBtnText:     { color: '#444466', fontSize: 11, fontFamily: 'monospace', fontWeight: '700' },
-  modeBtnTextActive: { color: BG },
+  pillBtn:            { paddingHorizontal: 13, paddingVertical: 8 },
+  pillBtnActive:      { backgroundColor: ACCENT },
+  pillBtnMagicActive: { backgroundColor: GREEN },
+  pillBtnText: {
+    color: '#444466', fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    fontWeight: '700',
+  },
+  pillBtnTextActive:  { color: BG },
+  pillBtnMagicText:   { color: '#002211' },
 
-  panel:        { flex: 1, backgroundColor: CARD_BG, borderTopWidth: 1, borderTopColor: BORDER },
-  panelContent: { padding: 16, gap: 12, paddingBottom: 24 },
-  playRow:      { flexDirection: 'row', gap: 10 },
+  preview: {
+    width: '100%', backgroundColor: '#050510',
+    borderBottomWidth: 1, borderBottomColor: BORDER, overflow: 'hidden',
+  },
+  hiddenLayer: { opacity: 0 },
+
+  labelBadge: {
+    alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 12, paddingVertical: 3,
+    borderRadius: 4, marginTop: 4, marginBottom: 2,
+  },
+  labelText: {
+    color: '#333366', fontSize: 9,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 2,
+  },
+
+  panel: { flex: 1, padding: 16, gap: 12 },
+  row:   { flexDirection: 'row', gap: 10 },
+
   playBtn: {
     flex: 1, borderWidth: 1.5, borderColor: ACCENT,
     borderRadius: 6, paddingVertical: 12, alignItems: 'center',
   },
+  playBtnDisabled: { opacity: 0.45 },
   stopBtn:     { borderColor: '#ff4444' },
-  playBtnText: { color: ACCENT, fontWeight: '700', fontSize: 13, letterSpacing: 2, fontFamily: 'monospace' },
+  playBtnText: {
+    color: ACCENT, fontWeight: '700', fontSize: 13, letterSpacing: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+
   saveBtn: {
     borderWidth: 1, borderColor: GREEN, borderRadius: 6,
     paddingVertical: 12, paddingHorizontal: 20,
     alignItems: 'center', justifyContent: 'center', minWidth: 72,
   },
-  saveBtnText:  { color: GREEN, fontWeight: '700', fontSize: 12, letterSpacing: 2, fontFamily: 'monospace' },
-  btnDisabled:  { opacity: 0.5 },
+  saveBtnText: {
+    color: GREEN, fontWeight: '700', fontSize: 12, letterSpacing: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+  btnDisabled: { opacity: 0.5 },
+
   controlRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 10,
   },
-  controlCol:   { borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 10 },
-  controlLabel: { color: '#444466', fontSize: 9, fontFamily: 'monospace', letterSpacing: 2 },
-  stepper:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  label: {
+    color: '#444466', fontSize: 9,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 2,
+  },
+
+  stepper:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
   stepBtn: {
     width: 32, height: 32, borderRadius: 16,
     borderWidth: 1, borderColor: BORDER,
-    justifyContent: 'center', alignItems: 'center',
-    backgroundColor: BG,
+    justifyContent: 'center', alignItems: 'center', backgroundColor: BG,
   },
-  stepBtnText:  { color: ACCENT, fontSize: 18, lineHeight: 20 },
-  stepValue:    { color: '#eeeeff', fontSize: 15, fontWeight: '700', minWidth: 40, textAlign: 'center' },
+  stepBtnText: { color: ACCENT, fontSize: 18, lineHeight: 20 },
+  stepValue: {
+    color: '#eeeeff', fontSize: 15, fontWeight: '700',
+    minWidth: 40, textAlign: 'center',
+  },
+
+  chipRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   typeChip: {
-    marginRight: 8, paddingHorizontal: 12, paddingVertical: 7,
+    paddingHorizontal: 12, paddingVertical: 7,
     borderRadius: 4, borderWidth: 1, borderColor: BORDER,
   },
   typeChipActive: { borderColor: ACCENT, backgroundColor: 'rgba(0,212,255,0.08)' },
-  typeChipText:   { color: '#555577', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 },
-  gestureHint: {
-    color: '#333355', fontSize: 10, fontFamily: 'monospace',
+  typeChipText: {
+    color: '#555577', fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 1,
+  },
+
+  hint: {
+    color: '#333355', fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     textAlign: 'center', paddingTop: 4,
   },
 });
-

@@ -17,6 +17,9 @@ import { useAuth } from '../../src/hooks/useAuth';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
+const FORM_TEXT = '#ffffff';
+const INPUT_BORDER = 'rgba(255,255,255,0.55)';
+const PLACEHOLDER = '#b8c1df';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -64,14 +67,14 @@ export default function RegisterScreen() {
         <View style={styles.brand}>
           <Text style={styles.brandTag}>VR REAL ESTATE</Text>
           <Text style={styles.brandTitle}>Create account</Text>
-          <Text style={styles.brandSub}>Start managing your land portfolio</Text>
+          <Text style={styles.brandSub}>Start managing your unit portfolio</Text>
         </View>
 
         <View style={styles.form}>
           <TextInput
             style={styles.input}
             placeholder="Full name"
-            placeholderTextColor="#444466"
+            placeholderTextColor={PLACEHOLDER}
             autoCapitalize="words"
             value={fullName}
             onChangeText={setFullName}
@@ -79,7 +82,7 @@ export default function RegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Email address"
-            placeholderTextColor="#444466"
+            placeholderTextColor={PLACEHOLDER}
             keyboardType="email-address"
             autoCapitalize="none"
             value={email}
@@ -88,7 +91,7 @@ export default function RegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Password (min. 6 chars)"
-            placeholderTextColor="#444466"
+            placeholderTextColor={PLACEHOLDER}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
@@ -96,7 +99,7 @@ export default function RegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Confirm password"
-            placeholderTextColor="#444466"
+            placeholderTextColor={PLACEHOLDER}
             secureTextEntry
             value={confirm}
             onChangeText={setConfirm}
@@ -138,11 +141,11 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#0d0d22',
     borderWidth: 1,
-    borderColor: '#1a1a3a',
+    borderColor: INPUT_BORDER,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    color: '#eeeeff',
+    color: FORM_TEXT,
     fontSize: 15,
   },
   btn: {
@@ -156,3 +159,4 @@ const styles = StyleSheet.create({
   btnText: { color: BG, fontWeight: '800', fontSize: 14, letterSpacing: 3 },
   switchText: { color: '#555577', textAlign: 'center', fontSize: 14 },
 });
+

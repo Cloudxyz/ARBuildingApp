@@ -32,16 +32,26 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import ViewShot from 'react-native-view-shot';
 import { Procedural3DBuilding } from './Procedural3DBuilding';
+import type { Procedural3DDebugMetrics } from './Procedural3DBuilding';
 import { NormPoint, BuildingFootprintConfig } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Phase = 'pick' | 'draw' | 'build3d';
 interface Pt { x: number; y: number; }
+export interface MagicBuildPanelState {
+  phase: Phase;
+  isPlaying: boolean;
+  floorCount: number;
+  zoomValue: number;
+  canZoomIn: boolean;
+  canZoomOut: boolean;
+}
 
 // ── Snap (draw phase only) ────────────────────────────────────────────────────
 const CLOSE_RADIUS = 24;
 const AXIS_RATIO   = 0.28;
 const GRID_SIZE    = 16;
+const ZOOM_HOLD_DELAY_MS = 140;
 
 function snap(raw: Pt, pts: Pt[], grid: boolean): { pt: Pt; close: boolean } {
   if (pts.length >= 3) {
@@ -73,15 +83,41 @@ function computeImageRect(
   const dW     = photoW * scale;
   const dH     = photoH * scale;
   const left   = (canvasW - dW) / 2;
-  const top    = canvasH - dH;          // ← bottom-aligned
+  const top    = canvasH - dH; // bottom-aligned contain (preserves aspect ratio)
   return { left, top, w: dW, h: dH };
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
-interface Props { width: number; height: number; }
+interface Props {
+  width: number;
+  height: number;
+  active?: boolean;
+  showBuildToolbar?: boolean;
+  playCommandId?: number;
+  stopCommandId?: number;
+  incFloorCommandId?: number;
+  decFloorCommandId?: number;
+  externalZoomCommandId?: number;
+  externalZoomCommandDir?: 'in' | 'out';
+  externalZoomHoldDir?: -1 | 0 | 1;
+  onBuildStateChange?: (state: MagicBuildPanelState) => void;
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export default function MagicCanvasMode({ width, height }: Props) {
+export default function MagicCanvasMode({
+  width,
+  height,
+  active = true,
+  showBuildToolbar = true,
+  playCommandId = 0,
+  stopCommandId = 0,
+  incFloorCommandId = 0,
+  decFloorCommandId = 0,
+  externalZoomCommandId = 0,
+  externalZoomCommandDir = 'in',
+  externalZoomHoldDir = 0,
+  onBuildStateChange,
+}: Props) {
   const [phase,       setPhase]     = useState<Phase>('pick');
   const [photoUri,    setPhotoUri]  = useState<string | null>(null);
   const [photoNatW,   setPhotoNatW] = useState(0);  // natural / original pixel size
@@ -95,6 +131,21 @@ export default function MagicCanvasMode({ width, height }: Props) {
   const [isPlaying,      setIsPlaying]      = useState(false);
   const [animKey,        setAnimKey]        = useState(0);
   const [cameraResetKey, setCameraResetKey] = useState(0);
+  const [debugMetrics, setDebugMetrics] = useState<Procedural3DDebugMetrics | null>(null);
+  const [zoomCmdId, setZoomCmdId] = useState(0);
+  const [zoomCmdDir, setZoomCmdDir] = useState<'in' | 'out'>('in');
+  const [zoomHoldDir, setZoomHoldDir] = useState<-1 | 0 | 1>(0);
+  const [zoomUi, setZoomUi] = useState(1.0);
+  const [canZoomIn, setCanZoomIn] = useState(true);
+  const [canZoomOut, setCanZoomOut] = useState(true);
+  const zoomHoldStartedRef = useRef(false);
+  const zoomHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playCommandRef = useRef(playCommandId);
+  const stopCommandRef = useRef(stopCommandId);
+  const incFloorCommandRef = useRef(incFloorCommandId);
+  const decFloorCommandRef = useRef(decFloorCommandId);
+  const externalZoomCommandRef = useRef(externalZoomCommandId);
+  const buildStateCbRef = useRef(onBuildStateChange);
 
   const viewShotRef = useRef<ViewShot>(null);
 
@@ -103,6 +154,134 @@ export default function MagicCanvasMode({ width, height }: Props) {
     setCanvasW(e.nativeEvent.layout.width);
     setCanvasH(e.nativeEvent.layout.height);
   }, []);
+  const handleDebugMetrics = useCallback((metrics: Procedural3DDebugMetrics) => {
+    setDebugMetrics(metrics);
+  }, []);
+  React.useEffect(() => { buildStateCbRef.current = onBuildStateChange; }, [onBuildStateChange]);
+  const handleZoomMetrics = useCallback((metrics: {
+    zoomValue: number;
+    canZoomIn: boolean;
+    canZoomOut: boolean;
+  }) => {
+    setZoomUi(+metrics.zoomValue.toFixed(1));
+    setCanZoomIn(metrics.canZoomIn);
+    setCanZoomOut(metrics.canZoomOut);
+  }, []);
+
+  const triggerZoom = useCallback((dir: 'in' | 'out') => {
+    if (dir === 'in' && !canZoomIn) return;
+    if (dir === 'out' && !canZoomOut) return;
+    setZoomCmdDir(dir);
+    setZoomCmdId((k) => k + 1);
+  }, [canZoomIn, canZoomOut]);
+
+  const startZoomHold = useCallback((dir: -1 | 1) => {
+    if ((dir === 1 && !canZoomIn) || (dir === -1 && !canZoomOut)) return;
+    zoomHoldStartedRef.current = false;
+    if (zoomHoldTimerRef.current) {
+      clearTimeout(zoomHoldTimerRef.current);
+      zoomHoldTimerRef.current = null;
+    }
+    zoomHoldTimerRef.current = setTimeout(() => {
+      zoomHoldStartedRef.current = true;
+      setZoomHoldDir(dir);
+    }, ZOOM_HOLD_DELAY_MS);
+  }, [canZoomIn, canZoomOut]);
+
+  const stopZoomHold = useCallback(() => {
+    if (zoomHoldTimerRef.current) {
+      clearTimeout(zoomHoldTimerRef.current);
+      zoomHoldTimerRef.current = null;
+    }
+    setZoomHoldDir(0);
+  }, []);
+
+  const handleZoomTap = useCallback((dir: -1 | 1) => {
+    if (zoomHoldStartedRef.current) {
+      zoomHoldStartedRef.current = false;
+      return;
+    }
+    if (dir === 1) {
+      triggerZoom('in');
+    } else {
+      triggerZoom('out');
+    }
+  }, [triggerZoom]);
+
+  React.useEffect(() => {
+    if (zoomHoldDir === 1 && !canZoomIn) {
+      setZoomHoldDir(0);
+    } else if (zoomHoldDir === -1 && !canZoomOut) {
+      setZoomHoldDir(0);
+    }
+  }, [zoomHoldDir, canZoomIn, canZoomOut]);
+
+  React.useEffect(() => () => {
+    if (zoomHoldTimerRef.current) {
+      clearTimeout(zoomHoldTimerRef.current);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (playCommandRef.current !== playCommandId) {
+      playCommandRef.current = playCommandId;
+      if (phase === 'build3d') {
+        setAnimKey((k) => k + 1);
+        setIsPlaying(true);
+      }
+    }
+  }, [playCommandId, phase]);
+
+  React.useEffect(() => {
+    if (stopCommandRef.current !== stopCommandId) {
+      stopCommandRef.current = stopCommandId;
+      setIsPlaying(false);
+    }
+  }, [stopCommandId]);
+
+  React.useEffect(() => {
+    if (incFloorCommandRef.current !== incFloorCommandId) {
+      incFloorCommandRef.current = incFloorCommandId;
+      setFloorCount((f) => Math.min(40, f + 1));
+    }
+  }, [incFloorCommandId]);
+
+  React.useEffect(() => {
+    if (decFloorCommandRef.current !== decFloorCommandId) {
+      decFloorCommandRef.current = decFloorCommandId;
+      setFloorCount((f) => Math.max(1, f - 1));
+    }
+  }, [decFloorCommandId]);
+
+  React.useEffect(() => {
+    if (externalZoomCommandRef.current !== externalZoomCommandId) {
+      externalZoomCommandRef.current = externalZoomCommandId;
+      triggerZoom(externalZoomCommandDir);
+    }
+  }, [externalZoomCommandId, externalZoomCommandDir, triggerZoom]);
+
+  React.useEffect(() => {
+    if (externalZoomHoldDir === 1 && !canZoomIn) {
+      setZoomHoldDir(0);
+      return;
+    }
+    if (externalZoomHoldDir === -1 && !canZoomOut) {
+      setZoomHoldDir(0);
+      return;
+    }
+    setZoomHoldDir(externalZoomHoldDir);
+  }, [externalZoomHoldDir, canZoomIn, canZoomOut]);
+
+  React.useEffect(() => {
+    buildStateCbRef.current?.({
+      phase,
+      isPlaying,
+      floorCount,
+      zoomValue: zoomUi,
+      canZoomIn,
+      canZoomOut,
+    });
+  }, [phase, isPlaying, floorCount, zoomUi, canZoomIn, canZoomOut]);
 
   // ── Computed image rect ──────────────────────────────────────────────────
   const imgRect = useMemo(
@@ -195,31 +374,15 @@ export default function MagicCanvasMode({ width, height }: Props) {
     imageAspect:    imgRect.w > 0 ? imgRect.h / imgRect.w : 1,
   }), [normPoints, floorCount, imgRect]);
 
-  // ── GLView bounding box (canvas coords of polygon, + headroom above) ─────
-  // The GLView is positioned on screen exactly where the polygon was drawn.
-  const gl3 = useMemo(() => {
-    if (points.length < 3) return { left: 0, top: 0, w: canvasW, h: canvasH };
-    const xs = points.map(p => p.x), ys = points.map(p => p.y);
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const minY = Math.min(...ys), maxY = Math.max(...ys);
-    const bW   = Math.max(maxX - minX, 40);
-    const bH   = Math.max(maxY - minY, 40);
-    const padX  = bW  * 0.40;
-    const above = Math.min(bH * 2.2 + floorCount * 10, canvasH * 0.45);
-    const below = bH  * 0.12;
-    const l = Math.max(0,       minX - padX);
-    const t = Math.max(0,       minY - above);
-    const r = Math.min(canvasW, maxX + padX);
-    const b = Math.min(canvasH, maxY + below);
-    return { left: l, top: t, w: Math.max(r - l, 80), h: Math.max(b - t, 80) };
-  }, [points, floorCount, canvasW, canvasH]);
+  // ── GLView bounds (fixed to full preview) ─────────────────────────────────
+  // GL fills entire preview bounds.
 
   // ─────────────────────────────────────────────────────────────────────────
   // PICK PHASE
   // ─────────────────────────────────────────────────────────────────────────
   if (phase === 'pick') {
     return (
-      <View style={[styles.root, { width, height }]} onLayout={onContainerLayout}>
+      <View style={styles.root} onLayout={onContainerLayout}>
         <Text style={styles.pickTitle}>3D MAGIC</Text>
         <Text style={styles.pickSub}>
           Trace a building footprint on a photo,{'\n'}then watch it rise floor by floor.
@@ -243,7 +406,7 @@ export default function MagicCanvasMode({ width, height }: Props) {
   // ─────────────────────────────────────────────────────────────────────────
   if (phase === 'draw') {
     return (
-      <View style={[styles.root, { width, height }]} onLayout={onContainerLayout}>
+      <View style={styles.root} onLayout={onContainerLayout}>
 
         {/* Photo at bottom-aligned contain rect */}
         {photoUri && (
@@ -261,6 +424,7 @@ export default function MagicCanvasMode({ width, height }: Props) {
         )}
 
         {/* Tap receiver — full canvas area */}
+        
         {!closed && (
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -345,7 +509,7 @@ export default function MagicCanvasMode({ width, height }: Props) {
   // BUILD 3D PHASE
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <View style={[styles.root, { width, height }]} onLayout={onContainerLayout}>
+    <View style={styles.root} onLayout={onContainerLayout}>
       {/* @ts-ignore */}
       <ViewShot ref={viewShotRef} style={StyleSheet.absoluteFill}
         options={{ format: 'jpg', quality: 0.9 }}>
@@ -387,14 +551,14 @@ export default function MagicCanvasMode({ width, height }: Props) {
           </Svg>
         </View>
 
-        {/* 3D building — GLView sized and positioned over polygon bounding box */}
+        {/* 3D building */}
         <View
           style={{
             position: 'absolute',
-            left:     gl3.left,
-            top:      gl3.top,
-            width:    gl3.w,
-            height:   gl3.h,
+            left: 0,
+            top: 0,
+            width: canvasW,
+            height: canvasH,
             overflow: 'hidden',
           }}
         >
@@ -403,54 +567,61 @@ export default function MagicCanvasMode({ width, height }: Props) {
             isPlaying={isPlaying}
             animKey={animKey}
             cameraResetKey={cameraResetKey}
+            active={active}
+            interactionMode="moveModel"
+            onDebugMetrics={handleDebugMetrics}
+            zoomCommandId={zoomCmdId}
+            zoomCommandDir={zoomCmdDir}
+            zoomHoldDir={zoomHoldDir}
+            onZoomMetrics={handleZoomMetrics}
           />
         </View>
       </ViewShot>
 
-      {/* Toolbar */}
-      <View style={styles.buildToolbar} pointerEvents="box-none">
-        <TouchableOpacity style={styles.toolBtn}
-          onPress={() => { setAnimKey(k => k + 1); setIsPlaying(true); }}>
-          <Text style={styles.toolBtnText}>▶</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.toolBtn} onPress={() => setIsPlaying(false)}>
-          <Text style={styles.toolBtnText}>■</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.toolBtn} onPress={() => setFloorCount(f => Math.max(1, f - 1))}>
-          <Text style={styles.toolBtnText}>−F</Text>
-        </TouchableOpacity>
-        <View style={styles.floorLabel} pointerEvents="none">
-          <Text style={styles.floorLabelText}>{floorCount}F</Text>
-        </View>
-        <TouchableOpacity style={styles.toolBtn} onPress={() => setFloorCount(f => Math.min(40, f + 1))}>
-          <Text style={styles.toolBtnText}>+F</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.toolBtn}
-          onPress={() => { setIsPlaying(false); setPhase('draw'); }}>
-          <Text style={styles.toolBtnText}>✏</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.toolBtn, styles.toolBtnCamera]}
-          onPress={() => { resetDraw(); setPhase('pick'); }}>
-          <Text style={styles.toolBtnText}>📷</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.toolBtn, styles.toolBtnCapture]} onPress={handleCapture}>
-          <Text style={styles.toolBtnText}>📤</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.toolBtn, styles.toolBtnReset]}
-          onPress={() => setCameraResetKey(k => k + 1)}>
-          <Text style={styles.toolBtnText}>⟳</Text>
-        </TouchableOpacity>
+      <View style={styles.debugCoordsPanel} pointerEvents="none">
+        <Text style={styles.debugCoordsText}>
+          Pivot X screen: ({(debugMetrics?.modelScreenX ?? 0).toFixed(1)}, {(debugMetrics?.modelScreenY ?? 0).toFixed(1)})
+        </Text>
+        <Text style={styles.debugCoordsText}>
+          Pivot X world: ({(debugMetrics?.modelWorldX ?? 0).toFixed(2)}, {(debugMetrics?.modelWorldY ?? 0).toFixed(2)}, {(debugMetrics?.modelWorldZ ?? 0).toFixed(2)})
+        </Text>
+        <Text style={styles.debugCoordsText}>
+          Building coords: ({(debugMetrics?.buildingCordsX ?? 0).toFixed(2)}, {(debugMetrics?.buildingCordsY ?? 0).toFixed(2)}, {(debugMetrics?.buildingCordsZ ?? 0).toFixed(2)})
+        </Text>
+        <Text style={styles.debugCoordsText}>
+          Building coords screen: ({(debugMetrics?.buildingCordsScreenX ?? 0).toFixed(1)}, {(debugMetrics?.buildingCordsScreenY ?? 0).toFixed(1)})
+        </Text>
       </View>
+
+      {showBuildToolbar && (
+        <View style={styles.buildToolbar} pointerEvents="box-none">
+          <TouchableOpacity style={styles.toolBtn}
+            onPress={() => { setIsPlaying(false); setPhase('draw'); }}>
+            <Text style={styles.toolBtnText}>✏</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, styles.toolBtnCamera]}
+            onPress={() => { resetDraw(); setPhase('pick'); }}>
+            <Text style={styles.toolBtnText}>📷</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, styles.toolBtnCapture]} onPress={handleCapture}>
+            <Text style={styles.toolBtnText}>📤</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toolBtn, styles.toolBtnReset]}
+            onPress={() => setCameraResetKey(k => k + 1)}>
+            <Text style={[styles.toolBtnText, styles.toolBtnResetText]}>⟳</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-const TOOL_BG = 'rgba(0,0,0,0.65)';
+const TOOL_BG = 'rgba(0,0,0,0.55)';
 const ACCENT  = '#00d4ff';
 
 const styles = StyleSheet.create({
-  root: { overflow: 'hidden', backgroundColor: '#050510' },
+  root: { width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#050510' },
 
   // ── Pick ──────────────────────────────────────────────────────────────────
   pickTitle: {
@@ -495,13 +666,15 @@ const styles = StyleSheet.create({
     width: 38, height: 38, borderRadius: 8,
     backgroundColor: TOOL_BG,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(0,212,255,0.25)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
   },
   toolBtnOn: { borderColor: ACCENT, backgroundColor: 'rgba(0,212,255,0.18)' },
-  toolBtnCamera:  { borderColor: 'rgba(255,200,0,0.4)', backgroundColor: 'rgba(255,200,0,0.10)' },
-  toolBtnCapture: { borderColor: 'rgba(0,255,136,0.4)', backgroundColor: 'rgba(0,255,136,0.12)' },
-  toolBtnReset:   { borderColor: 'rgba(160,120,255,0.4)', backgroundColor: 'rgba(160,120,255,0.10)' },
-  toolBtnText: { color: '#ddeeff', fontSize: 16, lineHeight: 20 },
+  toolBtnCamera:  { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: TOOL_BG },
+  toolBtnCapture: { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: TOOL_BG },
+  toolBtnReset:   { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: TOOL_BG },
+  toolBtnText: { color: '#ffffff', fontSize: 16, lineHeight: 20 },
+  toolBtnResetText: { fontSize: 20, lineHeight: 22, fontWeight: '700' },
+  toolBtnTextDisabled: { color: 'rgba(221,238,255,0.35)' },
 
   // ── Bottom bar (draw) ─────────────────────────────────────────────────────
   drawBottom: {
@@ -517,4 +690,54 @@ const styles = StyleSheet.create({
   // ── Floor label ───────────────────────────────────────────────────────────
   floorLabel:     { width: 38, height: 24, alignItems: 'center', justifyContent: 'center' },
   floorLabelText: { color: ACCENT, fontSize: 12, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  debugCoordsPanel: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+    maxWidth: '82%',
+  },
+  debugCoordsText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+  imageGuideBox: {
+    position: 'absolute',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,212,255,0.95)',
+    borderStyle: 'dashed',
+    backgroundColor: 'transparent',
+  },
+  imageGuideLineH: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: 'rgba(0,212,255,0.85)',
+  },
+  imageGuideLineV: {
+    position: 'absolute',
+    width: 1,
+    backgroundColor: 'rgba(0,212,255,0.85)',
+  },
+  imageGuideLabel: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.55)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  imageGuideText: {
+    color: '#dff7ff',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
 });
+

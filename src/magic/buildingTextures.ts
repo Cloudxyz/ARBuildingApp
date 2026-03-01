@@ -38,44 +38,48 @@ export async function loadBuildingTextures(textureScale = 4): Promise<BuildingTe
   if (_loadPromise) return _loadPromise;
 
   _loadPromise = (async () => {
-    // 1. Resolve Expo assets (download to local cache if needed).
-    const [albedoAsset, aoAsset, normalAsset, roughnessAsset] = await Promise.all([
-      Asset.fromModule(require('../../assets/textures/building/albedo.jpg')).downloadAsync(),
-      Asset.fromModule(require('../../assets/textures/building/ao.jpg')).downloadAsync(),
-      Asset.fromModule(require('../../assets/textures/building/normal.jpg')).downloadAsync(),
-      Asset.fromModule(require('../../assets/textures/building/roughness.jpg')).downloadAsync(),
-    ]);
+    try {
+      // 1. Resolve Expo assets (download to local cache if needed).
+      const [albedoAsset, aoAsset, normalAsset, roughnessAsset] = await Promise.all([
+        Asset.fromModule(require('../../assets/textures/building/albedo.jpg')).downloadAsync(),
+        Asset.fromModule(require('../../assets/textures/building/ao.jpg')).downloadAsync(),
+        Asset.fromModule(require('../../assets/textures/building/normal.jpg')).downloadAsync(),
+        Asset.fromModule(require('../../assets/textures/building/roughness.jpg')).downloadAsync(),
+      ]);
 
-    console.log('[BuildingTextures] Resolved assets:', {
-      albedo:    albedoAsset.localUri,
-      ao:        aoAsset.localUri,
-      normal:    normalAsset.localUri,
-      roughness: roughnessAsset.localUri,
-    });
+      // 2. Load into THREE textures via expo-three.
+      //    loadTextureAsync's internal async IIFE does not propagate all errors
+      //    to reject(), so we race each load against a 10-second timeout to
+      //    prevent the whole chain from hanging forever.
+      const withTimeout = <T>(p: Promise<T>, ms = 10_000): Promise<T> =>
+        Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('Texture load timeout')), ms))]);
 
-    // 2. Load into THREE textures via expo-three.
-    const [albedo, ao, normal, roughness] = await Promise.all([
-      loadTextureAsync({ asset: albedoAsset }),
-      loadTextureAsync({ asset: aoAsset }),
-      loadTextureAsync({ asset: normalAsset }),
-      loadTextureAsync({ asset: roughnessAsset }),
-    ]);
+      const [albedo, ao, normal, roughness] = await Promise.all([
+        withTimeout(loadTextureAsync({ asset: albedoAsset })),
+        withTimeout(loadTextureAsync({ asset: aoAsset })),
+        withTimeout(loadTextureAsync({ asset: normalAsset })),
+        withTimeout(loadTextureAsync({ asset: roughnessAsset })),
+      ]);
 
-    // 3. Color-space: albedo is sRGB, all others stay linear.
-    albedo.colorSpace = THREE.SRGBColorSpace;
+      // 3. Color-space: albedo is sRGB, all others stay linear.
+      albedo.colorSpace = THREE.SRGBColorSpace;
 
-    // 4. Tiling.
-    for (const tex of [albedo, ao, normal, roughness]) {
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(textureScale, textureScale);
-      tex.needsUpdate = true;
+      // 4. Tiling.
+      for (const tex of [albedo, ao, normal, roughness]) {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(textureScale, textureScale);
+        tex.needsUpdate = true;
+      }
+
+      const result: BuildingTextures = { albedo, ao, normal, roughness };
+      _cache = result;
+      return result;
+    } catch (err) {
+      // Reset so the next call can retry instead of returning this failed promise.
+      _loadPromise = null;
+      throw err;
     }
-
-    const result: BuildingTextures = { albedo, ao, normal, roughness };
-    _cache = result;
-    _loadPromise = null;
-    return result;
   })();
 
   return _loadPromise;

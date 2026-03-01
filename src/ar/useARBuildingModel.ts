@@ -5,15 +5,15 @@ import {
   SharedValue,
 } from 'react-native-reanimated';
 import { Gesture, SimultaneousGesture } from 'react-native-gesture-handler';
-import { useLandModel } from '../hooks/useLands';
+import { useUnitModel } from '../hooks/useUnits';
 import { ARModelConfig, BuildingType } from '../types';
 
 // =============================================
 // Defaults
 // =============================================
 export const DEFAULT_AR_CONFIG: ARModelConfig = {
-  floorCount: 3,
-  buildSpeed: 3.0,
+  floorCount: 20,
+  buildSpeed: 4.0,
   scale: 1.0,
   rotationDeg: 0,
   offsetX: 0,
@@ -66,8 +66,8 @@ export interface ARBuildingModel {
 // =============================================
 // useARBuildingModel
 // =============================================
-export function useARBuildingModel(landId: string): ARBuildingModel {
-  const { model, saveModel } = useLandModel(landId);
+export function useARBuildingModel(unitId: string): ARBuildingModel {
+  const { model, saveModel } = useUnitModel(unitId);
 
   // ── Config ──────────────────────────────────
   const [config, setConfig] = useState<ARModelConfig>(DEFAULT_AR_CONFIG);
@@ -79,7 +79,7 @@ export function useARBuildingModel(landId: string): ARBuildingModel {
     const extra = (model.model_data ?? {}) as Partial<ARModelConfig>;
     setConfig({
       floorCount: model.floor_count,
-      buildSpeed: extra.buildSpeed ?? 3.0,
+      buildSpeed: extra.buildSpeed ?? 4.0,
       scale: model.scale,
       rotationDeg: model.rotation_deg,
       offsetX: extra.offsetX ?? 0,
@@ -181,7 +181,7 @@ export function useARBuildingModel(landId: string): ARBuildingModel {
   const save = useCallback(async (): Promise<boolean> => {
     setIsSaving(true);
     const result = await saveModel({
-      land_id: landId,
+      unit_id: unitId,
       floor_count: config.floorCount,
       scale: config.scale,
       rotation_deg: config.rotationDeg,
@@ -199,7 +199,7 @@ export function useARBuildingModel(landId: string): ARBuildingModel {
     });
     setIsSaving(false);
     return result !== null;
-  }, [config, landId, saveModel]);
+  }, [config, unitId, saveModel]);
 
   return {
     config,
@@ -222,3 +222,5 @@ export function useARBuildingModel(landId: string): ARBuildingModel {
     containerAnimatedStyle,
   };
 }
+
+

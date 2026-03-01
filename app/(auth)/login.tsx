@@ -16,6 +16,9 @@ import { useAuth } from '../../src/hooks/useAuth';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
+const FORM_TEXT = '#ffffff';
+const INPUT_BORDER = 'rgba(255,255,255,0.55)';
+const PLACEHOLDER = '#b8c1df';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -50,7 +53,7 @@ export default function LoginScreen() {
         <View style={styles.brand}>
           <Text style={styles.brandTag}>VR REAL ESTATE</Text>
           <Text style={styles.brandTitle}>Welcome back</Text>
-          <Text style={styles.brandSub}>Sign in to manage your lands</Text>
+          <Text style={styles.brandSub}>Sign in to manage your units</Text>
         </View>
 
         {/* Form */}
@@ -58,7 +61,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Email address"
-            placeholderTextColor="#444466"
+            placeholderTextColor={PLACEHOLDER}
             keyboardType="email-address"
             autoCapitalize="none"
             value={email}
@@ -67,7 +70,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Password"
-            placeholderTextColor="#444466"
+            placeholderTextColor={PLACEHOLDER}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
@@ -135,11 +138,11 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#0d0d22',
     borderWidth: 1,
-    borderColor: '#1a1a3a',
+    borderColor: INPUT_BORDER,
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    color: '#eeeeff',
+    color: FORM_TEXT,
     fontSize: 15,
   },
   btn: {
@@ -164,3 +167,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+

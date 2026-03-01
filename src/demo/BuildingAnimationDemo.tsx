@@ -3,7 +3,7 @@
  * =============================================
  * Standalone demo — NO Supabase, NO production data.
  * Lives exclusively under /src/demo.
- * Uses fictional land data.
+ * Uses fictional unit data.
  * =============================================
  */
 import React, { useState, useCallback } from 'react';
@@ -22,9 +22,9 @@ import { BuildingAnimation } from '../components/BuildingAnimation';
 import { BuildingConfig, BuildingType } from '../types';
 
 // =============================================
-// Fictional demo land data — no real data used
+// Fictional demo unit data — no real data used
 // =============================================
-const DEMO_LAND = {
+const DEMO_UNIT = {
   name: 'Sunset Ridge Estate',
   id: 'demo-0001',
   area_sqm: 2400,
@@ -135,32 +135,32 @@ export default function BuildingAnimationDemo() {
           <Text style={styles.headerSub}>No real data • Gestures: pinch to scale, rotate</Text>
         </View>
 
-        {/* Land Card */}
-        <View style={styles.landCard}>
-          <View style={styles.landCardLeft}>
-            <Text style={styles.landName}>{DEMO_LAND.name}</Text>
-            <Text style={styles.landMeta}>
-              {DEMO_LAND.city}, {DEMO_LAND.state} · {DEMO_LAND.area_sqm.toLocaleString()} m²
+        {/* Unit Card */}
+        <View style={styles.unitCard}>
+          <View style={styles.unitCardLeft}>
+            <Text style={styles.unitName}>{DEMO_UNIT.name}</Text>
+            <Text style={styles.unitMeta}>
+              {DEMO_UNIT.city}, {DEMO_UNIT.state} · {DEMO_UNIT.area_sqm.toLocaleString()} m²
             </Text>
-            <Text style={styles.landDesc} numberOfLines={2}>
-              {DEMO_LAND.description}
+            <Text style={styles.unitDesc} numberOfLines={2}>
+              {DEMO_UNIT.description}
             </Text>
           </View>
-          <View style={styles.landCardRight}>
-            <Text style={styles.landPrice}>${(DEMO_LAND.price / 1000).toFixed(0)}K</Text>
+          <View style={styles.unitCardRight}>
+            <Text style={styles.unitPrice}>${(DEMO_UNIT.price / 1000).toFixed(0)}K</Text>
             <View
               style={[
                 styles.statusBadge,
-                { backgroundColor: DEMO_LAND.status === 'available' ? '#00aa5522' : '#aa220022' },
+                { backgroundColor: DEMO_UNIT.status === 'available' ? '#00aa5522' : '#aa220022' },
               ]}
             >
               <Text
                 style={[
                   styles.statusText,
-                  { color: DEMO_LAND.status === 'available' ? '#00ff88' : '#ff4444' },
+                  { color: DEMO_UNIT.status === 'available' ? '#00ff88' : '#ff4444' },
                 ]}
               >
-                {DEMO_LAND.status.toUpperCase()}
+                {DEMO_UNIT.status.toUpperCase()}
               </Text>
             </View>
           </View>
@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontFamily: 'monospace',
   },
-  landCard: {
+  unitCard: {
     flexDirection: 'row',
     backgroundColor: CARD_BG,
     marginHorizontal: 16,
@@ -313,32 +313,32 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     padding: 14,
   },
-  landCardLeft: {
+  unitCardLeft: {
     flex: 1,
     marginRight: 12,
   },
-  landCardRight: {
+  unitCardRight: {
     alignItems: 'flex-end',
     justifyContent: 'space-between',
   },
-  landName: {
+  unitName: {
     color: '#eeeeff',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 2,
   },
-  landMeta: {
+  unitMeta: {
     color: ACCENT,
     fontSize: 11,
     fontFamily: 'monospace',
     marginBottom: 4,
   },
-  landDesc: {
+  unitDesc: {
     color: '#888899',
     fontSize: 11,
     lineHeight: 16,
   },
-  landPrice: {
+  unitPrice: {
     color: '#00ff88',
     fontSize: 18,
     fontWeight: '800',

@@ -45,48 +45,155 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 -- =============================================
--- LANDS
+-- DEVELOPMENTS (Fraccionamientos / Condominios)
 -- =============================================
-CREATE TABLE IF NOT EXISTS lands (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE IF NOT EXISTS developments (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name         TEXT NOT NULL,
+  type         TEXT NOT NULL CHECK (type IN ('fraccionamiento', 'condominio')),
   description  TEXT,
-  area_sqm     NUMERIC(12, 2),
-  latitude     DOUBLE PRECISION,
-  longitude    DOUBLE PRECISION,
   address      TEXT,
   city         TEXT,
   state        TEXT,
   country      TEXT DEFAULT 'US',
-  price        NUMERIC(14, 2),
-  status       TEXT NOT NULL DEFAULT 'available'
-                CHECK (status IN ('available', 'reserved', 'sold')),
-  thumbnail_url TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE lands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE developments ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view own lands"
-  ON lands FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can view own developments" ON developments;
+DROP POLICY IF EXISTS "Users can insert own developments" ON developments;
+DROP POLICY IF EXISTS "Users can update own developments" ON developments;
+DROP POLICY IF EXISTS "Users can delete own developments" ON developments;
 
-CREATE POLICY "Users can insert own lands"
-  ON lands FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can view own developments"
+  ON developments FOR SELECT USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can update own lands"
-  ON lands FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own developments"
+  ON developments FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own lands"
-  ON lands FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "Users can update own developments"
+  ON developments FOR UPDATE USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own developments"
+  ON developments FOR DELETE USING (auth.uid() = user_id);
 
 -- =============================================
--- LAND MODELS (AR Building Configurations)
+-- units
 -- =============================================
-CREATE TABLE IF NOT EXISTS land_models (
+CREATE TABLE IF NOT EXISTS units (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  land_id       UUID NOT NULL REFERENCES lands(id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  development_id UUID REFERENCES developments(id) ON DELETE SET NULL,
+  unit_type     TEXT NOT NULL DEFAULT 'land'
+                CHECK (unit_type IN ('land', 'house', 'building', 'commercial')),
+  model_glb_url TEXT,
+  name          TEXT NOT NULL,
+  description   TEXT,
+  area_sqm      NUMERIC(12, 2),
+  latitude      DOUBLE PRECISION,
+  longitude     DOUBLE PRECISION,
+  address       TEXT,
+  city          TEXT,
+  state         TEXT,
+  country       TEXT DEFAULT 'US',
+  price         NUMERIC(14, 2),
+  status        TEXT NOT NULL DEFAULT 'available'
+                 CHECK (status IN ('available', 'reserved', 'sold')),
+  thumbnail_url TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE units
+  ADD COLUMN IF NOT EXISTS development_id UUID REFERENCES developments(id) ON DELETE SET NULL;
+
+ALTER TABLE units ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own units" ON units;
+DROP POLICY IF EXISTS "Users can insert own units" ON units;
+DROP POLICY IF EXISTS "Users can update own units" ON units;
+DROP POLICY IF EXISTS "Users can delete own units" ON units;
+
+CREATE POLICY "Users can view own units"
+  ON units FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own units"
+  ON units FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      development_id IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM developments d
+        WHERE d.id = development_id
+          AND d.user_id = auth.uid()
+      )
+    )
+  );
+
+CREATE POLICY "Users can update own units"
+  ON units FOR UPDATE USING (auth.uid() = user_id)
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      development_id IS NULL
+      OR EXISTS (
+        SELECT 1
+        FROM developments d
+        WHERE d.id = development_id
+          AND d.user_id = auth.uid()
+      )
+    )
+  );
+
+CREATE POLICY "Users can delete own units"
+  ON units FOR DELETE USING (auth.uid() = user_id);
+
+-- =============================================
+-- unit type models (house/building/commercial)
+-- =============================================
+CREATE TABLE IF NOT EXISTS unit_type_models (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  unit_type     TEXT NOT NULL CHECK (unit_type IN ('house', 'building', 'commercial')),
+  model_glb_url TEXT,
+  external_model_glb_url TEXT,
+  storage_path  TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, unit_type)
+);
+
+ALTER TABLE unit_type_models ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own unit type models" ON unit_type_models;
+DROP POLICY IF EXISTS "Users can insert own unit type models" ON unit_type_models;
+DROP POLICY IF EXISTS "Users can update own unit type models" ON unit_type_models;
+DROP POLICY IF EXISTS "Users can delete own unit type models" ON unit_type_models;
+
+CREATE POLICY "Users can view own unit type models"
+  ON unit_type_models FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own unit type models"
+  ON unit_type_models FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own unit type models"
+  ON unit_type_models FOR UPDATE USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own unit type models"
+  ON unit_type_models FOR DELETE USING (auth.uid() = user_id);
+
+-- =============================================
+-- unit models (AR Building Configurations)
+-- =============================================
+CREATE TABLE IF NOT EXISTS unit_models (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  unit_id       UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   floor_count   INT NOT NULL DEFAULT 1 CHECK (floor_count BETWEEN 1 AND 20),
   scale         NUMERIC(5, 3) NOT NULL DEFAULT 1.0 CHECK (scale BETWEEN 0.1 AND 10.0),
@@ -101,19 +208,19 @@ CREATE TABLE IF NOT EXISTS land_models (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE land_models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE unit_models ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view own land models"
-  ON land_models FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can view own unit models"
+  ON unit_models FOR SELECT USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert own land models"
-  ON land_models FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can insert own unit models"
+  ON unit_models FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update own land models"
-  ON land_models FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can update own unit models"
+  ON unit_models FOR UPDATE USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete own land models"
-  ON land_models FOR DELETE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own unit models"
+  ON unit_models FOR DELETE USING (auth.uid() = user_id);
 
 -- =============================================
 -- UPDATED_AT TRIGGER HELPER
@@ -126,12 +233,20 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER lands_updated_at
-  BEFORE UPDATE ON lands
+CREATE TRIGGER units_updated_at
+  BEFORE UPDATE ON units
   FOR EACH ROW EXECUTE PROCEDURE update_updated_at();
 
-CREATE TRIGGER land_models_updated_at
-  BEFORE UPDATE ON land_models
+CREATE TRIGGER developments_updated_at
+  BEFORE UPDATE ON developments
+  FOR EACH ROW EXECUTE PROCEDURE update_updated_at();
+
+CREATE TRIGGER unit_models_updated_at
+  BEFORE UPDATE ON unit_models
+  FOR EACH ROW EXECUTE PROCEDURE update_updated_at();
+
+CREATE TRIGGER unit_type_models_updated_at
+  BEFORE UPDATE ON unit_type_models
   FOR EACH ROW EXECUTE PROCEDURE update_updated_at();
 
 CREATE TRIGGER profiles_updated_at
@@ -141,7 +256,13 @@ CREATE TRIGGER profiles_updated_at
 -- =============================================
 -- INDEXES
 -- =============================================
-CREATE INDEX IF NOT EXISTS idx_lands_user_id    ON lands(user_id);
-CREATE INDEX IF NOT EXISTS idx_lands_status     ON lands(status);
-CREATE INDEX IF NOT EXISTS idx_land_models_land ON land_models(land_id);
-CREATE INDEX IF NOT EXISTS idx_land_models_user ON land_models(user_id);
+CREATE INDEX IF NOT EXISTS idx_developments_user ON developments(user_id);
+CREATE INDEX IF NOT EXISTS idx_units_user_id    ON units(user_id);
+CREATE INDEX IF NOT EXISTS idx_units_development ON units(development_id);
+CREATE INDEX IF NOT EXISTS idx_units_unit_type  ON units(unit_type);
+CREATE INDEX IF NOT EXISTS idx_units_status     ON units(status);
+CREATE INDEX IF NOT EXISTS idx_unit_type_models_user ON unit_type_models(user_id);
+CREATE INDEX IF NOT EXISTS idx_unit_type_models_type ON unit_type_models(unit_type);
+CREATE INDEX IF NOT EXISTS idx_unit_models_unit ON unit_models(unit_id);
+CREATE INDEX IF NOT EXISTS idx_unit_models_user ON unit_models(user_id);
+

@@ -2,8 +2,10 @@
 // Database types — mirrors Supabase schema
 // =============================================
 
-export type LandStatus = 'available' | 'reserved' | 'sold';
+export type UnitStatus = 'available' | 'reserved' | 'sold';
+export type UnitType = 'land' | 'house' | 'building' | 'commercial';
 export type BuildingType = 'residential' | 'commercial' | 'industrial' | 'mixed';
+export type DevelopmentType = 'fraccionamiento' | 'condominio';
 
 export interface Profile {
   id: string;
@@ -14,9 +16,29 @@ export interface Profile {
   updated_at: string;
 }
 
-export interface Land {
+export interface Development {
   id: string;
   user_id: string;
+  name: string;
+  type: DevelopmentType;
+  description: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DevelopmentInsert = Omit<Development, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
+export type DevelopmentUpdate = Partial<DevelopmentInsert>;
+
+export interface Unit {
+  id: string;
+  user_id: string;
+  development_id: string | null;
+  unit_type: UnitType;
+  model_glb_url: string | null;
   name: string;
   description: string | null;
   area_sqm: number | null;
@@ -27,18 +49,56 @@ export interface Land {
   state: string | null;
   country: string | null;
   price: number | null;
-  status: LandStatus;
+  status: UnitStatus;
   thumbnail_url: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type LandInsert = Omit<Land, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
-export type LandUpdate = Partial<LandInsert>;
+export interface UnitInsert {
+  name: string;
+  unit_type?: UnitType;
+  model_glb_url?: string | null;
+  description?: string | null;
+  area_sqm?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  price?: number | null;
+  status?: UnitStatus;
+  thumbnail_url?: string | null;
+  development_id?: string | null;
+}
 
-export interface LandModel {
+export type UnitUpdate = Partial<UnitInsert>;
+
+export interface UnitTypeModel {
   id: string;
-  land_id: string;
+  user_id: string;
+  unit_type: Exclude<UnitType, 'land'>;
+  model_glb_url: string | null;
+  external_model_glb_url: string | null;
+  storage_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UnitTypeModelInsert {
+  user_id: string;
+  unit_type: Exclude<UnitType, 'land'>;
+  model_glb_url?: string | null;
+  external_model_glb_url?: string | null;
+  storage_path?: string | null;
+}
+
+export type UnitTypeModelUpdate = Partial<UnitTypeModelInsert>;
+
+export interface UnitModel {
+  id: string;
+  unit_id: string;
   user_id: string;
   floor_count: number;
   scale: number;
@@ -52,9 +112,9 @@ export interface LandModel {
   updated_at: string;
 }
 
-export type LandModelInsert = Omit<LandModel, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
+export type UnitModelInsert = Omit<UnitModel, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
 // model_data stores: { buildSpeed, offsetX, offsetY, blueprintOpacity, shadowStrength }
-export type LandModelUpdate = Partial<LandModelInsert>;
+export type UnitModelUpdate = Partial<UnitModelInsert>;
 
 // =============================================
 // Supabase Database helper type
@@ -81,7 +141,7 @@ export interface ParticleConfig {
 }
 
 // =============================================
-// Shared AR model config (persisted in land_models.model_data)
+// Shared AR model config (persisted in unit_models.model_data)
 // =============================================
 export interface ARModelConfig {
   floorCount: number;
@@ -98,4 +158,4 @@ export interface ARModelConfig {
   colorScheme: 'blueprint' | 'warm' | 'neon';
 }
 
-export type ARViewMode = 'blueprint' | '3d';
+export type ARViewMode = 'blueprint' | '3d' | 'magic3d';

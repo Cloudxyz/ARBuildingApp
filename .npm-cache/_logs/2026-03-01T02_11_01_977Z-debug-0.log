@@ -1,0 +1,149 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.6.2
+2 info using node@v24.13.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\Devalan\Desktop\App Land VR\.npmrc
+5 silly config load:file:C:\Users\Devalan\.npmrc
+6 silly config load:file:C:\Users\Devalan\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install expo-document-picker@~14.0.7
+8 verbose argv "install" "expo-document-picker@~14.0.7"
+9 verbose logfile logs-max:10 dir:C:\Users\Devalan\Desktop\App Land VR\.npm-cache\_logs\2026-03-01T02_11_01_977Z-
+10 verbose logfile C:\Users\Devalan\Desktop\App Land VR\.npm-cache\_logs\2026-03-01T02_11_01_977Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly idealTree buildDeps
+14 silly fetch manifest expo-document-picker@~14.0.7
+15 silly packumentCache full:https://registry.npmjs.org/expo-document-picker cache-miss
+16 http fetch GET https://registry.npmjs.org/expo-document-picker attempt 1 failed with EACCES
+17 http fetch GET https://registry.npmjs.org/expo-document-picker attempt 2 failed with EACCES
+18 http fetch GET https://registry.npmjs.org/expo-document-picker attempt 3 failed with EACCES
+19 silly placeDep ROOT expo-document-picker@ OK for: vr-real-estate@1.0.0 want: ~14.0.7
+20 silly fetch manifest expo-file-system@^13.2.0
+21 silly packumentCache full:https://registry.npmjs.org/expo-file-system cache-miss
+22 http fetch GET https://registry.npmjs.org/expo-file-system attempt 1 failed with EACCES
+23 http fetch GET https://registry.npmjs.org/expo-file-system attempt 2 failed with EACCES
+24 http fetch GET https://registry.npmjs.org/expo-file-system attempt 3 failed with EACCES
+25 silly fetch manifest react@^17.0.1
+26 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+27 http fetch GET https://registry.npmjs.org/react attempt 1 failed with EACCES
+28 http fetch GET https://registry.npmjs.org/react attempt 2 failed with EACCES
+29 http fetch GET https://registry.npmjs.org/react attempt 3 failed with EACCES
+30 silly fetch manifest react-native@^0.64.3
+31 silly packumentCache full:https://registry.npmjs.org/react-native cache-miss
+32 http fetch GET https://registry.npmjs.org/react-native attempt 1 failed with EACCES
+33 http fetch GET https://registry.npmjs.org/react-native attempt 2 failed with EACCES
+34 http fetch GET https://registry.npmjs.org/react-native attempt 3 failed with EACCES
+35 silly placeDep ROOT expo-file-system@ REPLACE for: @expo/browser-polyfill@1.0.1 want: ^13.2.0
+36 warn ERESOLVE overriding peer dependency {
+36 warn ERESOLVE   code: 'ERESOLVE',
+36 warn ERESOLVE   edge: {
+36 warn ERESOLVE     type: 'peer',
+36 warn ERESOLVE     name: 'expo-file-system',
+36 warn ERESOLVE     spec: '^13.2.0',
+36 warn ERESOLVE     error: 'MISSING',
+36 warn ERESOLVE     from: {
+36 warn ERESOLVE       location: 'C:\\Users\\Devalan\\Desktop\\App Land VR\\node_modules\\@expo\\browser-polyfill'
+36 warn ERESOLVE     }
+36 warn ERESOLVE   },
+36 warn ERESOLVE   dep: {
+36 warn ERESOLVE     name: 'expo-file-system',
+36 warn ERESOLVE     version: undefined,
+36 warn ERESOLVE     errors: [ [FetchError] ],
+36 warn ERESOLVE     package: {},
+36 warn ERESOLVE     whileInstalling: {
+36 warn ERESOLVE       name: '@expo/browser-polyfill',
+36 warn ERESOLVE       version: '1.0.1',
+36 warn ERESOLVE       path: 'C:\\Users\\Devalan\\Desktop\\App Land VR\\node_modules\\@expo\\browser-polyfill'
+36 warn ERESOLVE     },
+36 warn ERESOLVE     location: 'node_modules/expo-file-system',
+36 warn ERESOLVE     isWorkspace: false,
+36 warn ERESOLVE     dependents: [ [Object] ]
+36 warn ERESOLVE   },
+36 warn ERESOLVE   force: false,
+36 warn ERESOLVE   isMine: true,
+36 warn ERESOLVE   strictPeerDeps: false,
+36 warn ERESOLVE   current: null
+36 warn ERESOLVE }
+37 silly placeDep ROOT react@ OK for: @expo/browser-polyfill@1.0.1 want: ^17.0.1
+38 warn ERESOLVE overriding peer dependency {
+38 warn ERESOLVE   code: 'ERESOLVE',
+38 warn ERESOLVE   edge: {
+38 warn ERESOLVE     type: 'peer',
+38 warn ERESOLVE     name: 'react',
+38 warn ERESOLVE     spec: '^17.0.1',
+38 warn ERESOLVE     error: 'INVALID',
+38 warn ERESOLVE     from: {
+38 warn ERESOLVE       location: 'C:\\Users\\Devalan\\Desktop\\App Land VR\\node_modules\\@expo\\browser-polyfill'
+38 warn ERESOLVE     }
+38 warn ERESOLVE   },
+38 warn ERESOLVE   dep: {
+38 warn ERESOLVE     name: 'react',
+38 warn ERESOLVE     version: undefined,
+38 warn ERESOLVE     errors: [ [FetchError] ],
+38 warn ERESOLVE     package: {},
+38 warn ERESOLVE     whileInstalling: {
+38 warn ERESOLVE       name: '@expo/browser-polyfill',
+38 warn ERESOLVE       version: '1.0.1',
+38 warn ERESOLVE       path: 'C:\\Users\\Devalan\\Desktop\\App Land VR\\node_modules\\@expo\\browser-polyfill'
+38 warn ERESOLVE     },
+38 warn ERESOLVE     location: 'node_modules/react',
+38 warn ERESOLVE     isWorkspace: false,
+38 warn ERESOLVE     dependents: [ [Object] ]
+38 warn ERESOLVE   },
+38 warn ERESOLVE   force: false,
+38 warn ERESOLVE   isMine: true,
+38 warn ERESOLVE   strictPeerDeps: false,
+38 warn ERESOLVE   current: {
+38 warn ERESOLVE     name: 'react',
+38 warn ERESOLVE     version: undefined,
+38 warn ERESOLVE     errors: [ [FetchError] ],
+38 warn ERESOLVE     package: {},
+38 warn ERESOLVE     location: 'node_modules/react',
+38 warn ERESOLVE     isWorkspace: false,
+38 warn ERESOLVE     dependents: [ [Object] ]
+38 warn ERESOLVE   }
+38 warn ERESOLVE }
+39 silly placeDep ROOT react-native@ OK for: @expo/browser-polyfill@1.0.1 want: ^0.64.3
+40 warn ERESOLVE overriding peer dependency {
+40 warn ERESOLVE   code: 'ERESOLVE',
+40 warn ERESOLVE   edge: {
+40 warn ERESOLVE     type: 'peer',
+40 warn ERESOLVE     name: 'react-native',
+40 warn ERESOLVE     spec: '^0.64.3',
+40 warn ERESOLVE     error: 'INVALID',
+40 warn ERESOLVE     from: {
+40 warn ERESOLVE       location: 'C:\\Users\\Devalan\\Desktop\\App Land VR\\node_modules\\@expo\\browser-polyfill'
+40 warn ERESOLVE     }
+40 warn ERESOLVE   },
+40 warn ERESOLVE   dep: {
+40 warn ERESOLVE     name: 'react-native',
+40 warn ERESOLVE     version: undefined,
+40 warn ERESOLVE     errors: [ [FetchError] ],
+40 warn ERESOLVE     package: {},
+40 warn ERESOLVE     whileInstalling: {
+40 warn ERESOLVE       name: '@expo/browser-polyfill',
+40 warn ERESOLVE       version: '1.0.1',
+40 warn ERESOLVE       path: 'C:\\Users\\Devalan\\Desktop\\App Land VR\\node_modules\\@expo\\browser-polyfill'
+40 warn ERESOLVE     },
+40 warn ERESOLVE     location: 'node_modules/react-native',
+40 warn ERESOLVE     isWorkspace: false,
+40 warn ERESOLVE     dependents: [ [Object] ]
+40 warn ERESOLVE   },
+40 warn ERESOLVE   force: false,
+40 warn ERESOLVE   isMine: true,
+40 warn ERESOLVE   strictPeerDeps: false,
+40 warn ERESOLVE   current: {
+40 warn ERESOLVE     name: 'react-native',
+40 warn ERESOLVE     version: undefined,
+40 warn ERESOLVE     errors: [ [FetchError] ],
+40 warn ERESOLVE     package: {},
+40 warn ERESOLVE     location: 'node_modules/react-native',
+40 warn ERESOLVE     isWorkspace: false,
+40 warn ERESOLVE     dependents: [ [Object] ]
+40 warn ERESOLVE   }
+40 warn ERESOLVE }
+41 silly timing Tried to end timer that doesn't exist: idealTree:#root
+42 silly fetch manifest @expo/browser-polyfill@^1.0.1
+43 silly packumentCache full:https://registry.npmjs.org/@expo%2fbrowser-polyfill cache-miss
+44 http fetch GET https://registry.npmjs.org/@expo%2fbrowser-polyfill attempt 1 failed with EACCES
+45 http fetch GET https://registry.npmjs.org/@expo%2fbrowser-polyfill attempt 2 failed with EACCES

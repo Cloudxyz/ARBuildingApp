@@ -1,0 +1,25 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.6.2
+2 info using node@v24.13.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\Devalan\Desktop\App Land VR\.npmrc
+5 silly config load:file:C:\Users\Devalan\.npmrc
+6 silly config load:file:C:\Users\Devalan\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm exec supabase migration list
+8 verbose argv "exec" "--" "supabase" "migration" "list"
+9 verbose logfile logs-max:10 dir:C:\Users\Devalan\Desktop\App Land VR\.npm-cache\_logs\2026-03-01T01_12_55_201Z-
+10 verbose logfile C:\Users\Devalan\Desktop\App Land VR\.npm-cache\_logs\2026-03-01T01_12_55_201Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 http fetch GET https://registry.npmjs.org/supabase attempt 1 failed with EACCES
+14 http fetch GET https://registry.npmjs.org/supabase attempt 2 failed with EACCES
+15 http fetch GET https://registry.npmjs.org/supabase attempt 3 failed with EACCES
+16 http fetch GET 200 https://registry.npmjs.org/supabase 70071ms (cache stale)
+17 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+18 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+19 verbose cwd C:\Users\Devalan\Desktop\App Land VR
+20 verbose os Windows_NT 10.0.26200
+21 verbose node v24.13.0
+22 verbose npm  v11.6.2
+23 verbose exit 1
+24 verbose code 1
