@@ -27,7 +27,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   Platform,
   LayoutChangeEvent,
@@ -35,6 +34,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
+import { useDialog } from '../../../src/lib/dialog';
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -75,6 +75,7 @@ const LAND_PREVIEW_TYPES: Array<Exclude<UnitType, 'land'>> = [
 export default function UnitARPreviewScreen() {
   const isFocused = useIsFocused();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const dialog = useDialog();
   const { units } = useUnits();
   const unit = units.find((u) => u.id === id);
 
@@ -126,8 +127,8 @@ export default function UnitARPreviewScreen() {
 
   const handleSave = async () => {
     const ok = await ar.save();
-    if (ok) Alert.alert('Saved', 'Building configuration saved.');
-    else    Alert.alert('Error', 'Failed to save. Check your connection.');
+    if (ok) await dialog.alert({ title: 'Saved', message: 'Building configuration saved.' });
+    else    await dialog.alert({ title: 'Error', message: 'Failed to save. Check your connection.' });
   };
 
   // -- Blueprint state --------------------------------------------------------

@@ -7,10 +7,10 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Stack } from 'expo-router';
+import { useDialog } from '../../../src/lib/dialog';
 import { useUnitTypeModels } from '../../../src/hooks/useUnits';
 import { supabase } from '../../../src/lib/supabase';
 import { UnitTypeModel } from '../../../src/types';
@@ -39,6 +39,7 @@ export default function UnitTypeModelsScreen() {
   } = useUnitTypeModels();
   const [busyType, setBusyType] = useState<UnitTypeModel['unit_type'] | null>(null);
   const [manualUrls, setManualUrls] = useState<ManualUrlState>({});
+  const dialog = useDialog();
 
   const getManualUrlValue = (unitType: UnitTypeModel['unit_type']) =>
     manualUrls[unitType] ?? modelsByType[unitType]?.external_model_glb_url ?? '';
@@ -59,13 +60,13 @@ export default function UnitTypeModelsScreen() {
 
       const file = picked.assets?.[0];
       if (!file?.uri) {
-        Alert.alert('Error', 'Could not read selected file.');
+        await dialog.alert({ title: 'Error', message: 'Could not read selected file.' });
         return;
       }
 
       const fileName = file.name ?? `unit_type_model_${Date.now()}.glb`;
       if (!fileName.toLowerCase().endsWith('.glb')) {
-        Alert.alert('Invalid file', 'Please select a .glb file.');
+        await dialog.alert({ title: 'Invalid file', message: 'Please select a .glb file.' });
         return;
       }
 
@@ -73,7 +74,7 @@ export default function UnitTypeModelsScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert('Error', 'Please sign in again to upload files.');
+        await dialog.alert({ title: 'Error', message: 'Please sign in again to upload files.' });
         return;
       }
 
@@ -106,7 +107,7 @@ export default function UnitTypeModelsScreen() {
 
       if (!saved) {
         await supabase.storage.from('unit-models').remove([storagePath]);
-        Alert.alert('Error', 'Could not save model reference in database.');
+        await dialog.alert({ title: 'Error', message: 'Could not save model reference in database.' });
         return;
       }
 
@@ -114,10 +115,10 @@ export default function UnitTypeModelsScreen() {
         await supabase.storage.from('unit-models').remove([previous.storage_path]);
       }
 
-      Alert.alert('Uploaded', `${unitType.toUpperCase()} uploaded model updated.`);
+      await dialog.alert({ title: 'Uploaded', message: `${unitType.toUpperCase()} uploaded model updated.` });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown upload error';
-      Alert.alert('Upload failed', message);
+      await dialog.alert({ title: 'Upload failed', message });
     } finally {
       setBusyType(null);
     }
@@ -128,7 +129,7 @@ export default function UnitTypeModelsScreen() {
 
     const raw = getManualUrlValue(unitType).trim();
     if (raw.length > 0 && !/^https?:\/\//i.test(raw)) {
-      Alert.alert('Invalid URL', 'Use a valid URL starting with http:// or https://');
+      await dialog.alert({ title: 'Invalid URL', message: 'Use a valid URL starting with http:// or https://' });
       return;
     }
 
@@ -139,48 +140,47 @@ export default function UnitTypeModelsScreen() {
         external_model_glb_url: raw.length > 0 ? raw : null,
       });
       if (!saved) {
-        Alert.alert('Error', 'Could not save URL in database.');
+        await dialog.alert({ title: 'Error', message: 'Could not save URL in database.' });
         return;
       }
 
       setManualUrlValue(unitType, raw);
-      Alert.alert('Saved', raw.length > 0 ? 'Manual URL saved.' : 'Manual URL removed.');
+      await dialog.alert({ title: 'Saved', message: raw.length > 0 ? 'Manual URL saved.' : 'Manual URL removed.' });
     } finally {
       setBusyType(null);
     }
   };
 
-  const handleRemoveUploaded = (unitType: UnitTypeModel['unit_type']) => {
+  const handleRemoveUploaded = async (unitType: UnitTypeModel['unit_type']) => {
     const current = modelsByType[unitType];
     if (!current || (!current.model_glb_url && !current.storage_path) || busyType) return;
 
-    Alert.alert('Remove uploaded file', `Remove uploaded ${unitType.toUpperCase()} file?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          setBusyType(unitType);
-          try {
-            if (current.storage_path) {
-              await supabase.storage.from('unit-models').remove([current.storage_path]);
-            }
-            const saved = await upsertUnitTypeModel({
-              unit_type: unitType,
-              model_glb_url: null,
-              storage_path: null,
-            });
-            if (!saved) {
-              Alert.alert('Error', 'Could not remove uploaded model from database.');
-              return;
-            }
-            Alert.alert('Removed', 'Uploaded file removed. Manual URL (if set) remains active.');
-          } finally {
-            setBusyType(null);
-          }
-        },
-      },
-    ]);
+    const confirmed = await dialog.confirm({
+      title: 'Remove uploaded file',
+      message: `Remove uploaded ${unitType.toUpperCase()} file?`,
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setBusyType(unitType);
+    try {
+      if (current.storage_path) {
+        await supabase.storage.from('unit-models').remove([current.storage_path]);
+      }
+      const saved = await upsertUnitTypeModel({
+        unit_type: unitType,
+        model_glb_url: null,
+        storage_path: null,
+      });
+      if (!saved) {
+        await dialog.alert({ title: 'Error', message: 'Could not remove uploaded model from database.' });
+        return;
+      }
+      await dialog.alert({ title: 'Removed', message: 'Uploaded file removed. Manual URL (if set) remains active.' });
+    } finally {
+      setBusyType(null);
+    }
   };
 
   return (

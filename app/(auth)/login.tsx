@@ -8,10 +8,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useDialog } from '../../src/lib/dialog';
 import { useAuth } from '../../src/hooks/useAuth';
 
 const ACCENT = '#00d4ff';
@@ -23,20 +23,21 @@ const PLACEHOLDER = '#b8c1df';
 export default function LoginScreen() {
   const router = useRouter();
   const { signIn } = useAuth();
+  const dialog = useDialog();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Error', 'Please enter your email and password.');
+      await dialog.alert({ title: 'Error', message: 'Please enter your email and password.' });
       return;
     }
     setLoading(true);
     const error = await signIn(email.trim(), password);
     setLoading(false);
     if (error) {
-      Alert.alert('Login Failed', error);
+      await dialog.alert({ title: 'Login Failed', message: error });
     } else {
       router.replace('/(app)');
     }

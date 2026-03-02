@@ -19,13 +19,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   RefreshControl,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRoleContext, AppRole } from '../../../src/lib/RoleContext';
 import { useAuth } from '../../../src/hooks/useAuth';
+import { useDialog } from '../../../src/lib/dialog';
 import { supabase } from '../../../src/lib/supabase';
 import { Development, Unit } from '../../../src/types';
 
@@ -158,6 +158,7 @@ function UnitCard({ unit, onDelete }: { unit: Unit & { ownerEmail?: string }; on
 export default function AdminScreen() {
   const { isMaster } = useRoleContext();
   const { user: currentUser } = useAuth();
+  const dialog = useDialog();
   const insets = useSafeAreaInsets();
   const safeBottom = insets.bottom + 24;
 
@@ -250,90 +251,66 @@ export default function AdminScreen() {
   useEffect(() => { fetchUsers(); fetchDevs(); fetchUnits(); }, [fetchUsers, fetchDevs, fetchUnits]);
 
   // ─ Role toggle ────────────────────────────────────────────────────────────
-  const handleToggleRole = useCallback((user: UserRow) => {
+  const handleToggleRole = useCallback(async (user: UserRow) => {
     const nextRole: AppRole = user.role === 'master_admin' ? 'user' : 'master_admin';
-    const label = nextRole === 'master_admin' ? 'PROMOTE to Master Admin' : 'DEMOTE to User';
-    Alert.alert(
-      label,
-      `${label} for ${user.email}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm',
-          style: nextRole === 'master_admin' ? 'default' : 'destructive',
-          onPress: async () => {
-            const { error } = await supabase
-              .from('user_roles')
-              .upsert({ user_id: user.id, role: nextRole }, { onConflict: 'user_id' });
-            if (error) { Alert.alert('Error', error.message); return; }
-            fetchUsers();
-          },
-        },
-      ]
-    );
-  }, [fetchUsers]);
+    const label = nextRole === 'master_admin' ? 'Promote to Master Admin' : 'Demote to User';
+    const ok = await dialog.confirm({
+      title: label,
+      message: `${label} for ${user.email}?`,
+      confirmText: 'Confirm',
+      destructive: nextRole !== 'master_admin',
+    });
+    if (!ok) return;
+    const { error } = await supabase
+      .from('user_roles')
+      .upsert({ user_id: user.id, role: nextRole }, { onConflict: 'user_id' });
+    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
+    fetchUsers();
+  }, [fetchUsers, dialog]);
 
   // ─ Delete user (hard-delete via Edge Function — removes auth.users row + cascade) ─
-  const handleDeleteUser = useCallback((user: UserRow) => {
-    Alert.alert(
-      'Delete User',
-      `Permanently delete ${user.email}?\n\nThis removes their auth account and ALL associated data (developments, units, models). This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Permanently',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.functions.invoke('admin-delete-user', {
-              body: { userId: user.id },
-            });
-            if (error) { Alert.alert('Error', error.message); return; }
-            fetchUsers();
-          },
-        },
-      ]
-    );
-  }, [fetchUsers]);
+  const handleDeleteUser = useCallback(async (user: UserRow) => {
+    const ok = await dialog.confirm({
+      title: 'Delete User',
+      message: `Permanently delete ${user.email}?\n\nThis removes their auth account and ALL associated data. This cannot be undone.`,
+      confirmText: 'Delete Permanently',
+      destructive: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.functions.invoke('admin-delete-user', {
+      body: { userId: user.id },
+    });
+    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
+    fetchUsers();
+  }, [fetchUsers, dialog]);
 
   // ─ Delete development ─────────────────────────────────────────────────────
-  const handleDeleteDev = useCallback((dev: Development) => {
-    Alert.alert(
-      'Delete Development',
-      `Delete "${dev.name}"? Units will be unassigned.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.from('developments').delete().eq('id', dev.id);
-            if (error) { Alert.alert('Error', error.message); return; }
-            fetchDevs();
-          },
-        },
-      ]
-    );
-  }, [fetchDevs]);
+  const handleDeleteDev = useCallback(async (dev: Development) => {
+    const ok = await dialog.confirm({
+      title: 'Delete Development',
+      message: `Delete "${dev.name}"? Units will be unassigned.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.from('developments').delete().eq('id', dev.id);
+    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
+    fetchDevs();
+  }, [fetchDevs, dialog]);
 
   // ─ Delete unit ────────────────────────────────────────────────────────────
-  const handleDeleteUnit = useCallback((unit: Unit) => {
-    Alert.alert(
-      'Delete Unit',
-      `Delete "${unit.name}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.from('units').delete().eq('id', unit.id);
-            if (error) { Alert.alert('Error', error.message); return; }
-            fetchUnits();
-          },
-        },
-      ]
-    );
-  }, [fetchUnits]);
+  const handleDeleteUnit = useCallback(async (unit: Unit) => {
+    const ok = await dialog.confirm({
+      title: 'Delete Unit',
+      message: `Delete "${unit.name}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.from('units').delete().eq('id', unit.id);
+    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
+    fetchUnits();
+  }, [fetchUnits, dialog]);
 
   // ─ Guard ──────────────────────────────────────────────────────────────────
   if (!isMaster) {

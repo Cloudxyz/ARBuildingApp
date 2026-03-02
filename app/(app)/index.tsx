@@ -8,12 +8,12 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
-  Alert,
   Platform,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useDialog } from '../../src/lib/dialog';
 import { useDevelopments, useUnits } from '../../src/hooks/useUnits';
 import { useAuth } from '../../src/hooks/useAuth';
 import { useRoleContext } from '../../src/lib/RoleContext';
@@ -132,6 +132,7 @@ export default function HomeScreen() {
   } = useDevelopments();
   const { signOut } = useAuth();
   const { isMaster } = useRoleContext();
+  const dialog = useDialog();
   const insets = useSafeAreaInsets();
   const safeBottomInset =
     insets.bottom + (Platform.OS === 'android' ? ANDROID_BOTTOM_SAFE_GUARD : 0);
@@ -157,31 +158,29 @@ export default function HomeScreen() {
   }, [units]);
 
   const handleDeleteUnit = useCallback(
-    (id: string, name: string) => {
-      Alert.alert('Delete Unit', `Delete "${name}"?`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => deleteUnit(id),
-        },
-      ]);
+    async (id: string, name: string) => {
+      const ok = await dialog.confirm({
+        title: 'Delete Unit',
+        message: `Delete "${name}"?`,
+        confirmText: 'Delete',
+        destructive: true,
+      });
+      if (ok) deleteUnit(id);
     },
-    [deleteUnit]
+    [deleteUnit, dialog]
   );
 
   const handleDeleteDevelopment = useCallback(
-    (id: string, name: string) => {
-      Alert.alert('Delete Development', `Delete "${name}"? Units remain unassigned.`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => deleteDevelopment(id),
-        },
-      ]);
+    async (id: string, name: string) => {
+      const ok = await dialog.confirm({
+        title: 'Delete Development',
+        message: `Delete "${name}"? Units remain unassigned.`,
+        confirmText: 'Delete',
+        destructive: true,
+      });
+      if (ok) deleteDevelopment(id);
     },
-    [deleteDevelopment]
+    [deleteDevelopment, dialog]
   );
 
   const handleSignOut = async () => {

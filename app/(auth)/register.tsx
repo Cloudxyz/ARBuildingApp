@@ -8,11 +8,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useDialog } from '../../src/lib/dialog';
 import { useAuth } from '../../src/hooks/useAuth';
 
 const ACCENT = '#00d4ff';
@@ -24,6 +24,7 @@ const PLACEHOLDER = '#b8c1df';
 export default function RegisterScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
+  const dialog = useDialog();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,28 +33,28 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     if (!fullName.trim() || !email.trim() || !password) {
-      Alert.alert('Error', 'All fields are required.');
+      await dialog.alert({ title: 'Error', message: 'All fields are required.' });
       return;
     }
     if (password !== confirm) {
-      Alert.alert('Error', 'Passwords do not match.');
+      await dialog.alert({ title: 'Error', message: 'Passwords do not match.' });
       return;
     }
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters.');
+      await dialog.alert({ title: 'Error', message: 'Password must be at least 6 characters.' });
       return;
     }
     setLoading(true);
     const error = await signUp(email.trim(), password, fullName.trim());
     setLoading(false);
     if (error) {
-      Alert.alert('Registration Failed', error);
+      await dialog.alert({ title: 'Registration Failed', message: error });
     } else {
-      Alert.alert(
-        'Account Created',
-        'Check your email to confirm your account, then sign in.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
-      );
+      await dialog.alert({
+        title: 'Account Created',
+        message: 'Check your email to confirm your account, then sign in.',
+      });
+      router.replace('/(auth)/login');
     }
   };
 

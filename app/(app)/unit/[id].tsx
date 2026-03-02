@@ -5,11 +5,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
+import { useDialog } from '../../../src/lib/dialog';
 import { useUnitGlbModels, useUnitModel, useUnits } from '../../../src/hooks/useUnits';
 import { UnitType, resolveGlbSource } from '../../../src/types';
 
@@ -31,25 +31,24 @@ function InfoRow({ label, value }: { label: string; value: string | number | nul
 export default function UnitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const dialog = useDialog();
   const { units, loading: unitsLoading, error: unitsError, deleteUnit } = useUnits();
   const { model, loading: modelLoading } = useUnitModel(id);
 
   const unit = units.find((u) => u.id === id);
   const { byType: glbByType } = useUnitGlbModels(id);
 
-  const handleDelete = useCallback(() => {
-    Alert.alert('Delete Unit', `Delete "${unit?.name}"? This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteUnit(id);
-          router.replace('/(app)');
-        },
-      },
-    ]);
-  }, [deleteUnit, id, unit?.name, router]);
+  const handleDelete = useCallback(async () => {
+    const ok = await dialog.confirm({
+      title: 'Delete Unit',
+      message: `Delete "${unit?.name}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteUnit(id);
+    router.replace('/(app)');
+  }, [deleteUnit, id, unit?.name, router, dialog]);
 
   if (unitsLoading && !unit) {
     return (

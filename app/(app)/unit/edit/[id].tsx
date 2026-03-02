@@ -8,10 +8,10 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useDialog } from '../../../../src/lib/dialog';
 import { useDevelopments, useUnitGlbModels, useUnits } from '../../../../src/hooks/useUnits';
 import { UnitInsert, UnitStatus, UnitType } from '../../../../src/types';
 import { supabase } from '../../../../src/lib/supabase';
@@ -35,6 +35,7 @@ const STATUS_COLORS: Record<UnitStatus, string> = {
 export default function EditUnitScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const dialog = useDialog();
   const { units, updateUnit } = useUnits();
   const unit = units.find((u) => u.id === id);
   const { developments, loading: developmentsLoading } = useDevelopments();
@@ -130,13 +131,13 @@ export default function EditUnitScreen() {
       if (picked.canceled) return;
 
       const file = picked.assets?.[0];
-      if (!file?.uri) { Alert.alert('Error', 'Could not read selected file.'); return; }
+      if (!file?.uri) { await dialog.alert({ title: 'Error', message: 'Could not read selected file.' }); return; }
 
       const fileName = file.name ?? `unit_model_${Date.now()}.glb`;
-      if (!fileName.toLowerCase().endsWith('.glb')) { Alert.alert('Invalid file', 'Please select a .glb file.'); return; }
+      if (!fileName.toLowerCase().endsWith('.glb')) { await dialog.alert({ title: 'Invalid file', message: 'Please select a .glb file.' }); return; }
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { Alert.alert('Error', 'Please sign in again to upload files.'); return; }
+      if (!user) { await dialog.alert({ title: 'Error', message: 'Please sign in again to upload files.' }); return; }
 
       setUploadingModelType(type);
       const res = await fetch(file.uri);
@@ -156,9 +157,9 @@ export default function EditUnitScreen() {
         ...prev,
         [type]: { ...prev[type], glbUrl: data.publicUrl, storagePath },
       }));
-      Alert.alert('Uploaded', `${type.toUpperCase()} model uploaded successfully.`);
+      await dialog.alert({ title: 'Uploaded', message: `${type.toUpperCase()} model uploaded successfully.` });
     } catch (err) {
-      Alert.alert('Upload failed', err instanceof Error ? err.message : 'Unknown error');
+      await dialog.alert({ title: 'Upload failed', message: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
       setUploadingModelType(null);
     }
@@ -166,7 +167,7 @@ export default function EditUnitScreen() {
 
   const handleSave = async () => {
     if (!form.name?.trim()) {
-      Alert.alert('Error', 'Name is required.');
+      await dialog.alert({ title: 'Error', message: 'Name is required.' });
       return;
     }
     setLoading(true);
@@ -202,7 +203,7 @@ export default function EditUnitScreen() {
       router.replace({ pathname: '/(app)/unit/[id]', params: { id } });
     } else {
       setLoading(false);
-      Alert.alert('Error', 'Could not save changes. Check your connection.');
+      await dialog.alert({ title: 'Error', message: 'Could not save changes. Check your connection.' });
     }
   };
 

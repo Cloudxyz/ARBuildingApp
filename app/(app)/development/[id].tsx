@@ -7,9 +7,9 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useDialog } from '../../../src/lib/dialog';
 import { useDevelopments } from '../../../src/hooks/useUnits';
 import { DevelopmentType } from '../../../src/types';
 
@@ -26,6 +26,7 @@ const TYPE_OPTIONS: DevelopmentType[] = ['fraccionamiento', 'condominio'];
 export default function EditDevelopmentScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const dialog = useDialog();
   const {
     developments,
     loading: developmentsLoading,
@@ -69,7 +70,7 @@ export default function EditDevelopmentScreen() {
   const handleSave = async () => {
     if (!development) return;
     if (!form.name.trim()) {
-      Alert.alert('Error', 'Name is required.');
+      await dialog.alert({ title: 'Error', message: 'Name is required.' });
       return;
     }
 
@@ -86,27 +87,23 @@ export default function EditDevelopmentScreen() {
     setSaving(false);
 
     if (!ok) {
-      Alert.alert('Error', 'Could not update development.');
+      await dialog.alert({ title: 'Error', message: 'Could not update development.' });
       return;
     }
     router.back();
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!development) return;
-    Alert.alert('Delete Development', `Delete "${development.name}"? Units remain unassigned.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          const ok = await deleteDevelopment(development.id);
-          if (ok) {
-            router.replace('/(app)');
-          }
-        },
-      },
-    ]);
+    const ok = await dialog.confirm({
+      title: 'Delete Development',
+      message: `Delete "${development.name}"? Units remain unassigned.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    const deleted = await deleteDevelopment(development.id);
+    if (deleted) router.replace('/(app)');
   };
 
   if (developmentsLoading && !development) {

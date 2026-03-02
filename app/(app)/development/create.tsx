@@ -7,9 +7,9 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
+import { useDialog } from '../../../src/lib/dialog';
 import { useDevelopments } from '../../../src/hooks/useUnits';
 import { DevelopmentInsert, DevelopmentType } from '../../../src/types';
 
@@ -26,6 +26,7 @@ const TYPE_OPTIONS: DevelopmentType[] = ['fraccionamiento', 'condominio'];
 export default function CreateDevelopmentScreen() {
   const router = useRouter();
   const { createDevelopment } = useDevelopments();
+  const dialog = useDialog();
   const [loading, setLoading] = useState(false);
 
   const [form, setForm] = useState<Partial<DevelopmentInsert>>({
@@ -43,7 +44,7 @@ export default function CreateDevelopmentScreen() {
 
   const handleSave = async () => {
     if (!form.name?.trim()) {
-      Alert.alert('Error', 'Name is required.');
+      await dialog.alert({ title: 'Error', message: 'Name is required.' });
       return;
     }
 
@@ -60,11 +61,10 @@ export default function CreateDevelopmentScreen() {
     setLoading(false);
 
     if (!created) {
-      Alert.alert('Error', 'Could not create development.');
+      await dialog.alert({ title: 'Error', message: 'Could not create development.' });
       return;
     }
 
-    Alert.alert('Saved', 'Development created successfully.');
     router.back();
   };
 
