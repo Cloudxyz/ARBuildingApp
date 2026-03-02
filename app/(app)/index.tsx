@@ -15,6 +15,7 @@ import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDevelopments, useUnits } from '../../src/hooks/useUnits';
 import { useAuth } from '../../src/hooks/useAuth';
+import { useRoleContext } from '../../src/lib/RoleContext';
 import { Development, Unit } from '../../src/types';
 
 const ACCENT = '#00d4ff';
@@ -129,6 +130,7 @@ export default function HomeScreen() {
     deleteDevelopment,
   } = useDevelopments();
   const { signOut } = useAuth();
+  const { isMaster } = useRoleContext();
   const insets = useSafeAreaInsets();
   const safeBottomInset =
     insets.bottom + (Platform.OS === 'android' ? ANDROID_BOTTOM_SAFE_GUARD : 0);
@@ -194,6 +196,11 @@ export default function HomeScreen() {
           ),
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 12, marginRight: 4 }}>
+              {isMaster && (
+                <TouchableOpacity onPress={() => router.push('/(app)/admin')}>
+                  <Text style={{ color: '#ff44cc', fontFamily: 'monospace', fontSize: 11, fontWeight: '700' }}>ADMIN</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity onPress={() => router.push('/(app)/demo')}>
                 <Text style={{ color: '#ffe044', fontFamily: 'monospace', fontSize: 11 }}>DEMO</Text>
               </TouchableOpacity>
