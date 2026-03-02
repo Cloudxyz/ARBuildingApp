@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDevelopments, useUnits } from '../../src/hooks/useUnits';
 import { useAuth } from '../../src/hooks/useAuth';
@@ -134,6 +135,14 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const safeBottomInset =
     insets.bottom + (Platform.OS === 'android' ? ANDROID_BOTTOM_SAFE_GUARD : 0);
+
+  // Refetch whenever this screen comes back into focus (e.g. after create)
+  useFocusEffect(
+    useCallback(() => {
+      fetchDevelopments();
+      fetchUnits();
+    }, [fetchDevelopments, fetchUnits])
+  );
 
   const currentError = activeTab === 'units' ? unitsError : developmentsError;
   const currentLoading = activeTab === 'units' ? unitsLoading : developmentsLoading;
