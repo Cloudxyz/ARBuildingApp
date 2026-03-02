@@ -12,7 +12,16 @@
 --   INSERT INTO public.user_roles (user_id, role)
 --   VALUES ('<your-auth-uid>', 'master_admin');
 
--- 1. Helper function (defined first — policies below reference it)
+-- 1. Role table (must exist before the function references it)
+CREATE TABLE IF NOT EXISTS public.user_roles (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK (role IN ('user', 'master_admin')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id)
+);
+
+-- 2. Helper function (table must exist first for sql-language validation)
 CREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS TEXT
 LANGUAGE sql
@@ -24,15 +33,6 @@ AS $$
     'user'
   );
 $$;
-
--- 2. Role table
-CREATE TABLE IF NOT EXISTS public.user_roles (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  role       TEXT NOT NULL CHECK (role IN ('user', 'master_admin')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (user_id)
-);
 
 -- 3. RLS on user_roles
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;

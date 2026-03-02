@@ -268,6 +268,23 @@ CREATE INDEX IF NOT EXISTS idx_unit_models_user ON unit_models(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_roles_user  ON user_roles(user_id);
 
 -- =============================================
+-- RBAC — user_roles table
+-- =============================================
+-- One row per user. Missing row = 'user' (safe default).
+-- Roles: 'user' | 'master_admin'
+--
+-- Bootstrap first master_admin via Supabase dashboard:
+--   INSERT INTO public.user_roles (user_id, role)
+--   VALUES ('<auth-uid>', 'master_admin');
+CREATE TABLE IF NOT EXISTS user_roles (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK (role IN ('user', 'master_admin')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id)
+);
+
+-- =============================================
 -- RBAC — get_my_role() helper
 -- =============================================
 -- Returns the role of the currently authenticated user.
@@ -286,23 +303,6 @@ AS $$
     'user'
   );
 $$;
-
--- =============================================
--- RBAC — user_roles table
--- =============================================
--- One row per user. Missing row = 'user' (safe default).
--- Roles: 'user' | 'master_admin'
---
--- Bootstrap first master_admin via Supabase dashboard:
---   INSERT INTO public.user_roles (user_id, role)
---   VALUES ('<auth-uid>', 'master_admin');
-CREATE TABLE IF NOT EXISTS user_roles (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  role       TEXT NOT NULL CHECK (role IN ('user', 'master_admin')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (user_id)
-);
 
 ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
 
