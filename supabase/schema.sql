@@ -265,4 +265,55 @@ CREATE INDEX IF NOT EXISTS idx_unit_type_models_user ON unit_type_models(user_id
 CREATE INDEX IF NOT EXISTS idx_unit_type_models_type ON unit_type_models(unit_type);
 CREATE INDEX IF NOT EXISTS idx_unit_models_unit ON unit_models(unit_id);
 CREATE INDEX IF NOT EXISTS idx_unit_models_user ON unit_models(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user  ON user_roles(user_id);
+
+-- =============================================
+-- RBAC — get_my_role() helper
+-- =============================================
+-- Returns the role of the currently authenticated user.
+-- Defaults to 'user' if no row exists in user_roles.
+-- SECURITY DEFINER: runs as owner so it can read user_roles
+-- without the caller needing a SELECT policy on it.
+-- STABLE: Postgres caches result within a single query.
+CREATE OR REPLACE FUNCTION public.get_my_role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT COALESCE(
+    (SELECT role FROM public.user_roles WHERE user_id = auth.uid()),
+    'user'
+  );
+$$;
+
+-- =============================================
+-- RBAC — user_roles table
+-- =============================================
+-- One row per user. Missing row = 'user' (safe default).
+-- Roles: 'user' | 'master_admin'
+--
+-- Bootstrap first master_admin via Supabase dashboard:
+--   INSERT INTO public.user_roles (user_id, role)
+--   VALUES ('<auth-uid>', 'master_admin');
+CREATE TABLE IF NOT EXISTS user_roles (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK (role IN ('user', 'master_admin')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id)
+);
+
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read own role" ON user_roles;
+CREATE POLICY "Users can read own role"
+  ON user_roles FOR SELECT
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Master admin can manage all roles" ON user_roles;
+CREATE POLICY "Master admin can manage all roles"
+  ON user_roles FOR ALL
+  USING (public.get_my_role() = 'master_admin')
+  WITH CHECK (public.get_my_role() = 'master_admin');
 
