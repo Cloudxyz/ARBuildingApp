@@ -34,6 +34,14 @@ CREATE POLICY "Master admin can update all profiles"
   USING (public.get_my_role() = 'master_admin')
   WITH CHECK (public.get_my_role() = 'master_admin');
 
+CREATE POLICY "Master admin can delete any profile"
+  ON profiles FOR DELETE
+  USING (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can insert any profile"
+  ON profiles FOR INSERT
+  WITH CHECK (public.get_my_role() = 'master_admin');
+
 -- Auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$

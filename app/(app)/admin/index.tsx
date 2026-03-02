@@ -261,18 +261,20 @@ export default function AdminScreen() {
     );
   }, [fetchUsers]);
 
-  // ─ Delete user (profile only — auth row requires service role) ────────────
+  // ─ Delete user (hard-delete via Edge Function — removes auth.users row + cascade) ─
   const handleDeleteUser = useCallback((user: UserRow) => {
     Alert.alert(
       'Delete User',
-      `Remove profile for ${user.email}?\n\nNote: their auth account remains; they cannot access data once profile is removed.`,
+      `Permanently delete ${user.email}?\n\nThis removes their auth account and ALL associated data (developments, units, models). This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete Profile',
+          text: 'Delete Permanently',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await supabase.from('profiles').delete().eq('id', user.id);
+            const { error } = await supabase.functions.invoke('admin-delete-user', {
+              body: { userId: user.id },
+            });
             if (error) { Alert.alert('Error', error.message); return; }
             fetchUsers();
           },
@@ -324,9 +326,12 @@ export default function AdminScreen() {
   // ─ Guard ──────────────────────────────────────────────────────────────────
   if (!isMaster) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.guardText}>Access denied.</Text>
-      </View>
+      <>
+        <Stack.Screen options={{ title: 'Admin Panel', headerShown: true }} />
+        <View style={styles.centered}>
+          <Text style={styles.guardText}>Access denied.</Text>
+        </View>
+      </>
     );
   }
 
