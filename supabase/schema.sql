@@ -25,6 +25,15 @@ CREATE POLICY "Users can view own profile"
 CREATE POLICY "Users can update own profile"
   ON profiles FOR UPDATE USING (auth.uid() = id);
 
+CREATE POLICY "Master admin can view all profiles"
+  ON profiles FOR SELECT
+  USING (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can update all profiles"
+  ON profiles FOR UPDATE
+  USING (public.get_my_role() = 'master_admin')
+  WITH CHECK (public.get_my_role() = 'master_admin');
+
 -- Auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -80,6 +89,20 @@ CREATE POLICY "Users can update own developments"
 
 CREATE POLICY "Users can delete own developments"
   ON developments FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Master admin can view all developments"
+  ON developments FOR SELECT USING (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can insert any development"
+  ON developments FOR INSERT WITH CHECK (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can update any development"
+  ON developments FOR UPDATE
+  USING (public.get_my_role() = 'master_admin')
+  WITH CHECK (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can delete any development"
+  ON developments FOR DELETE USING (public.get_my_role() = 'master_admin');
 
 -- =============================================
 -- units
@@ -153,6 +176,20 @@ CREATE POLICY "Users can update own units"
 CREATE POLICY "Users can delete own units"
   ON units FOR DELETE USING (auth.uid() = user_id);
 
+CREATE POLICY "Master admin can view all units"
+  ON units FOR SELECT USING (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can insert any unit"
+  ON units FOR INSERT WITH CHECK (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can update any unit"
+  ON units FOR UPDATE
+  USING (public.get_my_role() = 'master_admin')
+  WITH CHECK (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can delete any unit"
+  ON units FOR DELETE USING (public.get_my_role() = 'master_admin');
+
 -- =============================================
 -- unit type models (house/building/commercial)
 -- =============================================
@@ -221,6 +258,20 @@ CREATE POLICY "Users can update own unit models"
 
 CREATE POLICY "Users can delete own unit models"
   ON unit_models FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Master admin can view all unit models"
+  ON unit_models FOR SELECT USING (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can insert any unit model"
+  ON unit_models FOR INSERT WITH CHECK (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can update any unit model"
+  ON unit_models FOR UPDATE
+  USING (public.get_my_role() = 'master_admin')
+  WITH CHECK (public.get_my_role() = 'master_admin');
+
+CREATE POLICY "Master admin can delete any unit model"
+  ON unit_models FOR DELETE USING (public.get_my_role() = 'master_admin');
 
 -- =============================================
 -- UPDATED_AT TRIGGER HELPER
