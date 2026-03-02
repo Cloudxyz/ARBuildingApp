@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import AnimatedPressable from '../../../src/components/AnimatedPressable';
+import AnimatedInput from '../../../src/components/AnimatedInput';
 import { useRouter, Stack } from 'expo-router';
 import { useDialog } from '../../../src/lib/dialog';
 import { useDevelopments } from '../../../src/hooks/useUnits';
@@ -74,14 +74,14 @@ export default function CreateDevelopmentScreen() {
       <ScrollView style={styles.root} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.sectionLabel}>BASIC INFORMATION</Text>
 
-        <TextInput
+        <AnimatedInput
           style={styles.input}
           placeholder="Development name *"
           placeholderTextColor={PLACEHOLDER}
           value={form.name ?? ''}
           onChangeText={(v) => setField('name', v)}
         />
-        <TextInput
+        <AnimatedInput
           style={[styles.input, styles.textarea]}
           placeholder="Description"
           placeholderTextColor={PLACEHOLDER}
@@ -94,7 +94,7 @@ export default function CreateDevelopmentScreen() {
         <Text style={styles.sectionLabel}>TYPE</Text>
         <View style={styles.typeRow}>
           {TYPE_OPTIONS.map((type) => (
-            <TouchableOpacity
+            <AnimatedPressable
               key={type}
               style={[styles.typeBtn, form.type === type && styles.typeBtnActive]}
               onPress={() => setField('type', type)}
@@ -102,12 +102,12 @@ export default function CreateDevelopmentScreen() {
               <Text style={[styles.typeBtnText, form.type === type && styles.typeBtnTextActive]}>
                 {type.toUpperCase()}
               </Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
 
         <Text style={styles.sectionLabel}>LOCATION</Text>
-        <TextInput
+        <AnimatedInput
           style={styles.input}
           placeholder="Street address"
           placeholderTextColor={PLACEHOLDER}
@@ -115,14 +115,14 @@ export default function CreateDevelopmentScreen() {
           onChangeText={(v) => setField('address', v)}
         />
         <View style={styles.row}>
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 2, marginRight: 8 }]}
             placeholder="City"
             placeholderTextColor={PLACEHOLDER}
             value={form.city ?? ''}
             onChangeText={(v) => setField('city', v)}
           />
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 1 }]}
             placeholder="State"
             placeholderTextColor={PLACEHOLDER}
@@ -131,7 +131,7 @@ export default function CreateDevelopmentScreen() {
             onChangeText={(v) => setField('state', v)}
           />
         </View>
-        <TextInput
+        <AnimatedInput
           style={styles.input}
           placeholder="Country"
           placeholderTextColor={PLACEHOLDER}
@@ -139,9 +139,9 @@ export default function CreateDevelopmentScreen() {
           onChangeText={(v) => setField('country', v)}
         />
 
-        <TouchableOpacity style={[styles.btn, loading && styles.btnDisabled]} onPress={handleSave} disabled={loading}>
+        <AnimatedPressable style={styles.btn} onPress={handleSave} disabled={loading}>
           {loading ? <ActivityIndicator color={BG} /> : <Text style={styles.btnText}>SAVE DEVELOPMENT</Text>}
-        </TouchableOpacity>
+        </AnimatedPressable>
       </ScrollView>
     </>
   );

@@ -177,6 +177,7 @@ export default function UnitARPreviewScreen() {
   const footerContentH = useRef(0);
   const footerContainerH = useRef(0);
   const footerScrollY = useRef(0);
+  const footerScrollRef = useRef<ScrollView>(null);
   const scrollBounceY = useSharedValue(0);
   const animatedArrowStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: scrollBounceY.value }],
@@ -235,6 +236,12 @@ export default function UnitARPreviewScreen() {
     if (mode !== '3d')      setView3dZoomHoldDir(0);
     if (mode !== 'magic3d') setMagicZoomHoldDir(0);
     setViewMode(mode);
+  }, [viewMode]);
+
+  // Reset controls panel scroll to top after each tab switch
+  useEffect(() => {
+    footerScrollY.current = 0;
+    footerScrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [viewMode]);
 
   // -- Play / Stop ------------------------------------------------------------
@@ -444,7 +451,7 @@ export default function UnitARPreviewScreen() {
     <>
       <Stack.Screen
         options={{
-          title: unit?.name ?? 'AR Preview',
+          title: unit?.name ? `${unit.name} - AR View` : 'AR View',
           headerTintColor: ACCENT,
         }}
       />
@@ -591,6 +598,7 @@ export default function UnitARPreviewScreen() {
         {/* Controls panel */}
         <View style={{ flex: 1, maxHeight: isMagicMode ? Math.round(height * 0.38) : undefined }}>
         <ScrollView
+          ref={footerScrollRef}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: panelBottomPadding }}

@@ -18,29 +18,40 @@ export function useAuth(): AuthState & {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        // Invalid/expired refresh token stored in AsyncStorage — clear stale session
-        supabase.auth.signOut();
+    // Wipe the invalid token from AsyncStorage without triggering a network call.
+    // scope:'local' still fires SIGNED_OUT, but our SIGNED_OUT handler below
+    // only sets state — it does NOT call signOut again, so there is no loop.
+    const wipeStaleToken = () => supabase.auth.signOut({ scope: 'local' });
+
+    supabase.auth
+      .getSession()
+      .then(({ data: { session }, error }) => {
+        if (error) {
+          wipeStaleToken(); // SIGNED_OUT handler will set loading:false
+          return;
+        }
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      })
+      .catch(() => {
+        wipeStaleToken();
+      });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESH_FAILED') {
+        // Background refresh failed — wipe stale token; the resulting SIGNED_OUT
+        // event will clean up state (no recursive loop).
+        wipeStaleToken();
+      } else if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
         setLoading(false);
-        return;
-      }
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
       } else {
         setSession(session);
         setUser(session?.user ?? null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => listener.subscription.unsubscribe();

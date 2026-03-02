@@ -13,7 +13,7 @@ export default function RootLayout() {
         <RoleProvider>
           <DialogProvider>
             <StatusBar style="light" translucent={false} backgroundColor="#0d0d22" />
-            <Stack screenOptions={{ headerShown: false }} />
+            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#070714' } }} />
           </DialogProvider>
         </RoleProvider>
       </GestureHandlerRootView>

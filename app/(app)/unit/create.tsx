@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   Modal,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import AnimatedPressable from '../../../src/components/AnimatedPressable';
+import AnimatedInput from '../../../src/components/AnimatedInput';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter, Stack } from 'expo-router';
 import { useDialog } from '../../../src/lib/dialog';
@@ -162,7 +163,7 @@ export default function CreateUnitScreen() {
         );
       }
       setLoading(false);
-      router.replace({ pathname: '/(app)/unit/[id]', params: { id: unit.id } });
+      router.replace({ pathname: '/(app)/unit/[id]', params: { id: unit.id, name: form.name?.trim() ?? '' } });
     } else {
       setLoading(false);
       await dialog.alert({ title: 'Error', message: 'Could not save unit. Check your connection.' });
@@ -180,14 +181,14 @@ export default function CreateUnitScreen() {
       >
         <Text style={styles.sectionLabel}>BASIC INFORMATION</Text>
 
-        <TextInput
+        <AnimatedInput
           style={styles.input}
           placeholder="Unit name *"
           placeholderTextColor={PLACEHOLDER}
           value={form.name}
           onChangeText={(v) => setField('name', v)}
         />
-        <TextInput
+        <AnimatedInput
           style={[styles.input, styles.textarea]}
           placeholder="Description"
           placeholderTextColor={PLACEHOLDER}
@@ -198,7 +199,7 @@ export default function CreateUnitScreen() {
         />
 
         <Text style={styles.sectionLabel}>LOCATION</Text>
-        <TextInput
+        <AnimatedInput
           style={styles.input}
           placeholder="Street address"
           placeholderTextColor={PLACEHOLDER}
@@ -206,14 +207,14 @@ export default function CreateUnitScreen() {
           onChangeText={(v) => setField('address', v)}
         />
         <View style={styles.row}>
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 2, marginRight: 8 }]}
             placeholder="City"
             placeholderTextColor={PLACEHOLDER}
             value={form.city ?? ''}
             onChangeText={(v) => setField('city', v)}
           />
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 1 }]}
             placeholder="State"
             placeholderTextColor={PLACEHOLDER}
@@ -223,7 +224,7 @@ export default function CreateUnitScreen() {
           />
         </View>
         <View style={styles.row}>
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 1, marginRight: 8 }]}
             placeholder="Latitude"
             placeholderTextColor={PLACEHOLDER}
@@ -231,7 +232,7 @@ export default function CreateUnitScreen() {
             value={form.latitude?.toString() ?? ''}
             onChangeText={(v) => setField('latitude', v ? parseFloat(v) : null)}
           />
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 1 }]}
             placeholder="Longitude"
             placeholderTextColor={PLACEHOLDER}
@@ -243,7 +244,7 @@ export default function CreateUnitScreen() {
 
         <Text style={styles.sectionLabel}>DETAILS</Text>
         <View style={styles.row}>
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 1, marginRight: 8 }]}
             placeholder="Area (m2)"
             placeholderTextColor={PLACEHOLDER}
@@ -251,7 +252,7 @@ export default function CreateUnitScreen() {
             value={form.area_sqm?.toString() ?? ''}
             onChangeText={(v) => setField('area_sqm', v ? parseFloat(v) : null)}
           />
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { flex: 1 }]}
             placeholder="Price ($)"
             placeholderTextColor={PLACEHOLDER}
@@ -264,7 +265,7 @@ export default function CreateUnitScreen() {
         <Text style={styles.sectionLabel}>STATUS</Text>
         <View style={styles.statusRow}>
           {STATUS_OPTIONS.map((s) => (
-            <TouchableOpacity
+            <AnimatedPressable
               key={s}
               style={[
                 styles.statusBtn,
@@ -275,14 +276,14 @@ export default function CreateUnitScreen() {
               <Text style={[styles.statusBtnText, form.status === s && { color: STATUS_COLORS[s] }]}>
                 {s.toUpperCase()}
               </Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
 
         <Text style={styles.sectionLabel}>UNIT TYPE</Text>
         <View style={styles.statusRow}>
           {UNIT_TYPE_OPTIONS.map((type) => (
-            <TouchableOpacity
+            <AnimatedPressable
               key={type}
               style={[
                 styles.statusBtn,
@@ -293,22 +294,22 @@ export default function CreateUnitScreen() {
               <Text style={[styles.statusBtnText, form.unit_type === type && { color: ACCENT }]}>
                 {type.toUpperCase()}
               </Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.manageTypesBtn}
           onPress={() => router.push('/(app)/unit/type-models')}
         >
           <Text style={styles.manageTypesBtnText}>MANAGE TYPE MODELS</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <Text style={styles.sectionLabel}>MODELS BY UNIT TYPE</Text>
         <View style={styles.statusRow}>
           {UNIT_TYPE_OPTIONS.map((type) => {
             const hasDraft = !!(typeModels[type].glbUrl || typeModels[type].externalGlbUrl.trim());
             return (
-              <TouchableOpacity
+              <AnimatedPressable
                 key={type}
                 style={[
                   styles.statusBtn,
@@ -324,13 +325,13 @@ export default function CreateUnitScreen() {
                 ]}>
                   {type.toUpperCase()}
                 </Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             );
           })}
         </View>
         <View style={styles.typeModelPanel}>
-          <TouchableOpacity
-            style={[styles.uploadBtn, { marginBottom: 0 }, uploadingModelType === activeModelType && styles.btnDisabled]}
+          <AnimatedPressable
+            style={[styles.uploadBtn, { marginBottom: 0 }]}
             onPress={() => handlePickAndUploadModelForType(activeModelType)}
             disabled={uploadingModelType !== null}
           >
@@ -341,7 +342,7 @@ export default function CreateUnitScreen() {
                 {typeModels[activeModelType].glbUrl ? 'REPLACE .GLB FILE' : 'UPLOAD .GLB FILE'}
               </Text>
             )}
-          </TouchableOpacity>
+          </AnimatedPressable>
           {typeModels[activeModelType].glbUrl ? (
             <View style={[styles.uploadMetaRow, { marginTop: 8, marginBottom: 0 }]}>
               <Text style={styles.uploadMetaText} numberOfLines={1}>
@@ -360,7 +361,7 @@ export default function CreateUnitScreen() {
             </View>
           ) : null}
           <Text style={styles.orLabel}>— OR MANUAL URL (FALLBACK) —</Text>
-          <TextInput
+          <AnimatedInput
             style={[styles.input, { marginBottom: 0 }]}
             placeholder="https://example.com/model.glb"
             placeholderTextColor={PLACEHOLDER}
@@ -381,7 +382,7 @@ export default function CreateUnitScreen() {
           <ActivityIndicator color={ACCENT} style={{ marginVertical: 8 }} />
         ) : (
           <>
-            <TouchableOpacity style={styles.selectInput} onPress={() => setDevPickerVisible(true)} activeOpacity={0.8}>
+            <AnimatedPressable style={styles.selectInput} onPress={() => setDevPickerVisible(true)}>
               <Text
                 style={[
                   styles.selectInputText,
@@ -392,7 +393,7 @@ export default function CreateUnitScreen() {
                 {selectedDevelopmentName}
               </Text>
               <Text style={styles.selectChevron}>?</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
 
             <Modal
               visible={devPickerVisible}
@@ -461,9 +462,9 @@ export default function CreateUnitScreen() {
           </>
         )}
 
-        <TouchableOpacity style={[styles.btn, loading && styles.btnDisabled]} onPress={handleSave} disabled={loading}>
+        <AnimatedPressable style={styles.btn} onPress={handleSave} disabled={loading}>
           {loading ? <ActivityIndicator color={BG} /> : <Text style={styles.btnText}>SAVE UNIT</Text>}
-        </TouchableOpacity>
+        </AnimatedPressable>
       </ScrollView>
     </>
   );

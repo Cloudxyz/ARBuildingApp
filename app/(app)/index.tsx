@@ -4,12 +4,13 @@ import {
   Text,
   Image,
   FlatList,
-  TouchableOpacity,
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import AnimatedPressable from '../../src/components/AnimatedPressable';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,7 +33,7 @@ function UnitCard({ unit, onPress, onDelete }: { unit: Unit; onPress: () => void
     unit.status === 'available' ? '#00ff88' : unit.status === 'reserved' ? '#ffe044' : '#ff4444';
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
+    <AnimatedPressable style={styles.card} onPress={onPress}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardName} numberOfLines={1}>{unit.name}</Text>
         <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
@@ -57,16 +58,16 @@ function UnitCard({ unit, onPress, onDelete }: { unit: Unit; onPress: () => void
           {unit.price ? (
             <Text style={styles.price}>${(unit.price / 1000).toFixed(0)}K</Text>
           ) : null}
-          <TouchableOpacity onPress={onDelete} style={styles.deleteBtn}>
+          <AnimatedPressable onPress={onDelete} style={styles.deleteBtn} activeScale={0.92}>
             <Text style={styles.deleteBtnText}>✕</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </View>
 
       <View style={styles.arBadge}>
         <Text style={styles.arBadgeText}>TAP - AR VIEW</Text>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 
@@ -84,7 +85,7 @@ function DevelopmentCard({
   const typeColor = development.type === 'fraccionamiento' ? '#00ff88' : '#ffe044';
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
+    <AnimatedPressable style={styles.card} onPress={onPress}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardName} numberOfLines={1}>{development.name}</Text>
         <View style={[styles.statusDot, { backgroundColor: typeColor }]} />
@@ -104,12 +105,12 @@ function DevelopmentCard({
           <Text style={styles.cardMetaText}>{unitCount} UNITS</Text>
         </View>
         <View style={styles.cardActions}>
-          <TouchableOpacity onPress={onDelete} style={styles.deleteBtn}>
+          <AnimatedPressable onPress={onDelete} style={styles.deleteBtn} activeScale={0.92}>
             <Text style={styles.deleteBtnText}>✕</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 
@@ -205,16 +206,16 @@ export default function HomeScreen() {
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 12, marginRight: 4 }}>
               {isMaster && (
-                <TouchableOpacity onPress={() => router.push('/(app)/admin')}>
+                <AnimatedPressable onPress={() => router.push('/(app)/admin')}>
                   <Text style={{ color: '#ff44cc', fontFamily: 'monospace', fontSize: 11, fontWeight: '700' }}>ADMIN</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               )}
-              <TouchableOpacity onPress={() => router.push('/(app)/demo')}>
+              <AnimatedPressable onPress={() => router.push('/(app)/demo')}>
                 <Text style={{ color: '#ffe044', fontFamily: 'monospace', fontSize: 11 }}>DEMO</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleSignOut}>
+              </AnimatedPressable>
+              <AnimatedPressable onPress={handleSignOut}>
                 <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 11 }}>SIGN OUT</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           ),
         }}
@@ -222,22 +223,24 @@ export default function HomeScreen() {
 
       <View style={styles.root}>
         <View style={styles.tabsWrap}>
-          <TouchableOpacity
+          <AnimatedPressable
             style={[styles.tabBtn, activeTab === 'developments' && styles.tabBtnActive]}
             onPress={() => setActiveTab('developments')}
+            activeScale={0.97}
           >
             <Text style={[styles.tabBtnText, activeTab === 'developments' && styles.tabBtnTextActive]}>
               DEVELOPMENTS
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </AnimatedPressable>
+          <AnimatedPressable
             style={[styles.tabBtn, activeTab === 'units' && styles.tabBtnActive]}
             onPress={() => setActiveTab('units')}
+            activeScale={0.97}
           >
             <Text style={[styles.tabBtnText, activeTab === 'units' && styles.tabBtnTextActive]}>
               UNITS
             </Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         {currentError ? (
@@ -273,7 +276,7 @@ export default function HomeScreen() {
               renderItem={({ item }) => (
                 <UnitCard
                   unit={item}
-                  onPress={() => router.push({ pathname: '/(app)/unit/[id]', params: { id: item.id } })}
+                  onPress={() => router.push({ pathname: '/(app)/unit/[id]', params: { id: item.id, name: item.name } })}
                   onDelete={() => handleDeleteUnit(item.id, item.name)}
                 />
               )}
@@ -306,26 +309,28 @@ export default function HomeScreen() {
               <DevelopmentCard
                 development={item}
                 unitCount={unitCountByDevelopment[item.id] ?? 0}
-                onPress={() => router.push({ pathname: '/(app)/development/[id]', params: { id: item.id } })}
+                onPress={() => router.push({ pathname: '/(app)/development/[id]', params: { id: item.id, name: item.name } })}
                 onDelete={() => handleDeleteDevelopment(item.id, item.name)}
               />
             )}
           />
         )}
 
-        <TouchableOpacity
-          style={[styles.devFab, { bottom: 96 + safeBottomInset }]}
+        <AnimatedPressable
+          style={[styles.devFab, { bottom: 104 + safeBottomInset }]}
           onPress={() => router.push('/(app)/development/create')}
+          activeScale={0.93}
         >
-          <Text style={styles.devFabText}>+</Text>
-        </TouchableOpacity>
+          <MaterialCommunityIcons name="office-building-plus-outline" size={24} color={ACCENT} />
+        </AnimatedPressable>
 
-        <TouchableOpacity
+        <AnimatedPressable
           style={[styles.fab, { bottom: 28 + safeBottomInset }]}
           onPress={() => router.push('/(app)/unit/create')}
+          activeScale={0.93}
         >
-          <Text style={styles.fabText}>+</Text>
-        </TouchableOpacity>
+          <MaterialCommunityIcons name="home-plus-outline" size={24} color="#070714" />
+        </AnimatedPressable>
       </View>
     </>
   );
@@ -440,17 +445,18 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: ACCENT,
-    backgroundColor: 'rgba(0,212,255,0.12)',
+    backgroundColor: 'rgba(0,212,255,0.14)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   devFabText: {
     color: ACCENT,
-    fontSize: 26,
+    fontSize: 11,
     fontWeight: '700',
-    lineHeight: 30,
+    fontFamily: 'monospace',
+    letterSpacing: 1.5,
   },
   fab: {
     position: 'absolute',
@@ -462,11 +468,6 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: ACCENT,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 8,
   },
   fabText: { color: '#070714', fontSize: 26, fontWeight: '700', lineHeight: 30 },
 });

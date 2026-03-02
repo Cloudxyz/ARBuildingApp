@@ -106,6 +106,7 @@ export default function ARViewsDemoScreen() {
   const footerContentH = useRef(0);
   const footerContainerH = useRef(0);
   const footerScrollY = useRef(0);
+  const footerScrollRef = useRef<ScrollView>(null);
   const scrollBounceY = useSharedValue(0);
   const animatedArrowStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: scrollBounceY.value }],
@@ -257,6 +258,12 @@ export default function ARViewsDemoScreen() {
     }
     setViewMode(mode);
   };
+  // Reset the controls panel scroll whenever the tab changes, after the render commits.
+  useEffect(() => {
+    footerScrollY.current = 0;
+    footerScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [viewMode]);
+
   const handleZoomOut = useCallback(() => {
     if (!view3dCanZoomOut) return;
     setView3dZoomCmdDir('out');
@@ -537,6 +544,7 @@ export default function ARViewsDemoScreen() {
 
       <View style={[styles.panel, isMagicMode && { maxHeight: Math.round(height * 0.38) }]}>
         <ScrollView
+          ref={footerScrollRef}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={[styles.panelContent, { paddingBottom: panelBottomPadding }]}

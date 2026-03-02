@@ -12,6 +12,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useDialog } from '../../../src/lib/dialog';
 import { useDevelopments } from '../../../src/hooks/useUnits';
 import { DevelopmentType } from '../../../src/types';
+import ScreenLoader from '../../../src/components/ScreenLoader';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
@@ -24,7 +25,7 @@ const PLACEHOLDER = '#b8c1df';
 const TYPE_OPTIONS: DevelopmentType[] = ['fraccionamiento', 'condominio'];
 
 export default function EditDevelopmentScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, name: paramName } = useLocalSearchParams<{ id: string; name?: string }>();
   const router = useRouter();
   const dialog = useDialog();
   const {
@@ -132,7 +133,7 @@ export default function EditDevelopmentScreen() {
     <>
       <Stack.Screen
         options={{
-          title: 'Edit Development',
+          title: development?.name ?? paramName ?? 'Development',
           headerRight: () => (
             <TouchableOpacity onPress={handleDelete} style={{ marginRight: 4 }}>
               <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 11 }}>DELETE</Text>
@@ -213,6 +214,8 @@ export default function EditDevelopmentScreen() {
           {saving ? <ActivityIndicator color={BG} /> : <Text style={styles.btnText}>SAVE CHANGES</Text>}
         </TouchableOpacity>
       </ScrollView>
+
+      <ScreenLoader ready={!!development} />
     </>
   );
 }

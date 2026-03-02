@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
+  Image,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import AnimatedPressable from '../../src/components/AnimatedPressable';
+import AnimatedInput from '../../src/components/AnimatedInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useDialog } from '../../src/lib/dialog';
@@ -52,14 +53,20 @@ export default function LoginScreen() {
         <View style={styles.inner}>
         {/* Branding */}
         <View style={styles.brand}>
-          <Text style={styles.brandTag}>VR REAL ESTATE</Text>
+          <View style={styles.logoRow}>
+            <Image
+              source={require('../../assets/icons/portfolio-logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
           <Text style={styles.brandTitle}>Welcome back</Text>
           <Text style={styles.brandSub}>Sign in to manage your units</Text>
         </View>
 
         {/* Form */}
         <View style={styles.form}>
-          <TextInput
+          <AnimatedInput
             style={styles.input}
             placeholder="Email address"
             placeholderTextColor={PLACEHOLDER}
@@ -68,7 +75,7 @@ export default function LoginScreen() {
             value={email}
             onChangeText={setEmail}
           />
-          <TextInput
+          <AnimatedInput
             style={styles.input}
             placeholder="Password"
             placeholderTextColor={PLACEHOLDER}
@@ -77,8 +84,8 @@ export default function LoginScreen() {
             onChangeText={setPassword}
           />
 
-          <TouchableOpacity
-            style={[styles.btn, loading && styles.btnDisabled]}
+          <AnimatedPressable
+            style={styles.btn}
             onPress={handleLogin}
             disabled={loading}
           >
@@ -87,15 +94,15 @@ export default function LoginScreen() {
             ) : (
               <Text style={styles.btnText}>SIGN IN</Text>
             )}
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
-        <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
+        <AnimatedPressable onPress={() => router.push('/(auth)/register')}>
           <Text style={styles.switchText}>
             No account?{' '}
             <Text style={{ color: ACCENT }}>Create one</Text>
           </Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -114,23 +121,36 @@ const styles = StyleSheet.create({
   },
   brand: {
     marginBottom: 40,
+    alignItems: 'center',
   },
-  brandTag: {
-    color: ACCENT,
-    fontSize: 10,
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  logo: {
+    width: 128,
+    height: 88,
+  },
+  logoText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
     fontFamily: 'monospace',
-    letterSpacing: 4,
-    marginBottom: 10,
+    letterSpacing: 1.2,
   },
   brandTitle: {
     color: '#ffffff',
     fontSize: 32,
     fontWeight: '800',
     marginBottom: 6,
+    textAlign: 'center',
   },
   brandSub: {
     color: 'rgba(255,255,255,0.55)',
     fontSize: 14,
+    textAlign: 'center',
   },
   form: {
     marginBottom: 24,

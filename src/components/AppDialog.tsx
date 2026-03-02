@@ -5,15 +5,23 @@
  * Rendered by DialogProvider — do not use directly; call useDialog() instead.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Modal,
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   TouchableWithoutFeedback,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  interpolate,
+} from 'react-native-reanimated';
+import AnimatedPressable from './AnimatedPressable';
+import { popSpring, fastTiming } from '../lib/motion';
 
 const BG      = '#070714';
 const CARD_BG = '#0d0d22';
@@ -47,6 +55,23 @@ export function AppDialog({
   const confirmColor = destructive ? DANGER : ACCENT;
   const hasCancel = !!cancelText;
 
+  // ── Entrance animation ──────────────────────────────────────────────────────
+  const openVal = useSharedValue(0);
+
+  useEffect(() => {
+    openVal.value = visible
+      ? withSpring(1, popSpring)
+      : withTiming(0, fastTiming);
+  }, [visible, openVal]);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: openVal.value,
+    transform: [
+      { scale: interpolate(openVal.value, [0, 1], [0.88, 1]) },
+      { translateY: interpolate(openVal.value, [0, 1], [20, 0]) },
+    ],
+  }));
+
   return (
     <Modal
       transparent
@@ -62,7 +87,7 @@ export function AppDialog({
 
       {/* Card — centered, not tappable-through */}
       <View style={styles.centeredWrap} pointerEvents="box-none">
-        <View style={styles.card}>
+        <Animated.View style={[styles.card, cardStyle]}>
           {/* Title */}
           <Text style={styles.title}>{title}</Text>
 
@@ -77,29 +102,29 @@ export function AppDialog({
           {/* Buttons */}
           <View style={[styles.btnRow, !hasCancel && styles.btnRowCentered]}>
             {hasCancel && (
-              <TouchableOpacity
+              <AnimatedPressable
                 style={[styles.btn, styles.btnCancel]}
                 onPress={onCancel}
-                activeOpacity={0.7}
+                activeScale={0.94}
               >
                 <Text style={styles.btnCancelText}>{cancelText}</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             )}
-            <TouchableOpacity
+            <AnimatedPressable
               style={[
                 styles.btn,
                 hasCancel ? styles.btnConfirm : styles.btnConfirmFull,
                 { borderColor: confirmColor },
               ]}
               onPress={onConfirm}
-              activeOpacity={0.7}
+              activeScale={0.94}
             >
               <Text style={[styles.btnConfirmText, { color: confirmColor }]}>
                 {confirmText}
               </Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );

@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
+  Image,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import AnimatedPressable from '../../src/components/AnimatedPressable';
+import AnimatedInput from '../../src/components/AnimatedInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useDialog } from '../../src/lib/dialog';
@@ -66,13 +67,19 @@ export default function RegisterScreen() {
       >
         <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
         <View style={styles.brand}>
-          <Text style={styles.brandTag}>VR REAL ESTATE</Text>
+          <View style={styles.logoRow}>
+            <Image
+              source={require('../../assets/icons/portfolio-logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
           <Text style={styles.brandTitle}>Create account</Text>
           <Text style={styles.brandSub}>Start managing your unit portfolio</Text>
         </View>
 
         <View style={styles.form}>
-          <TextInput
+          <AnimatedInput
             style={styles.input}
             placeholder="Full name"
             placeholderTextColor={PLACEHOLDER}
@@ -80,7 +87,7 @@ export default function RegisterScreen() {
             value={fullName}
             onChangeText={setFullName}
           />
-          <TextInput
+          <AnimatedInput
             style={styles.input}
             placeholder="Email address"
             placeholderTextColor={PLACEHOLDER}
@@ -89,7 +96,7 @@ export default function RegisterScreen() {
             value={email}
             onChangeText={setEmail}
           />
-          <TextInput
+          <AnimatedInput
             style={styles.input}
             placeholder="Password (min. 6 chars)"
             placeholderTextColor={PLACEHOLDER}
@@ -97,7 +104,7 @@ export default function RegisterScreen() {
             value={password}
             onChangeText={setPassword}
           />
-          <TextInput
+          <AnimatedInput
             style={styles.input}
             placeholder="Confirm password"
             placeholderTextColor={PLACEHOLDER}
@@ -106,8 +113,8 @@ export default function RegisterScreen() {
             onChangeText={setConfirm}
           />
 
-          <TouchableOpacity
-            style={[styles.btn, loading && styles.btnDisabled]}
+          <AnimatedPressable
+            style={styles.btn}
             onPress={handleRegister}
             disabled={loading}
           >
@@ -116,15 +123,15 @@ export default function RegisterScreen() {
             ) : (
               <Text style={styles.btnText}>CREATE ACCOUNT</Text>
             )}
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
-        <TouchableOpacity onPress={() => router.back()}>
+        <AnimatedPressable onPress={() => router.back()}>
           <Text style={styles.switchText}>
             Already have an account?{' '}
             <Text style={{ color: ACCENT }}>Sign in</Text>
           </Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -134,10 +141,12 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   inner: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40 },
-  brand: { marginBottom: 36 },
-  brandTag: { color: ACCENT, fontSize: 10, fontFamily: 'monospace', letterSpacing: 4, marginBottom: 10 },
-  brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '800', marginBottom: 6 },
-  brandSub: { color: 'rgba(255,255,255,0.55)', fontSize: 14 },
+  brand: { marginBottom: 36, alignItems: 'center' },
+  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  logo: { width: 128, height: 88 },
+  logoText: { color: '#ffffff', fontSize: 13, fontWeight: '700', fontFamily: 'monospace', letterSpacing: 1.2 },
+  brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
+  brandSub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center' },
   form: { marginBottom: 24, gap: 12 },
   input: {
     backgroundColor: '#0d0d22',

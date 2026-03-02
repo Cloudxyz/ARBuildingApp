@@ -200,7 +200,7 @@ export default function EditUnitScreen() {
         }),
       );
       setLoading(false);
-      router.replace({ pathname: '/(app)/unit/[id]', params: { id } });
+      router.replace({ pathname: '/(app)/unit/[id]', params: { id, name: form.name?.trim() ?? '' } });
     } else {
       setLoading(false);
       await dialog.alert({ title: 'Error', message: 'Could not save changes. Check your connection.' });

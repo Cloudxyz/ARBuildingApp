@@ -2,11 +2,12 @@ import React, { useCallback } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import AnimatedPressable from '../../../src/components/AnimatedPressable';
+import ScreenLoader from '../../../src/components/ScreenLoader';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import { useDialog } from '../../../src/lib/dialog';
@@ -29,7 +30,7 @@ function InfoRow({ label, value }: { label: string; value: string | number | nul
 }
 
 export default function UnitDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, name: paramName } = useLocalSearchParams<{ id: string; name?: string }>();
   const router = useRouter();
   const dialog = useDialog();
   const { units, loading: unitsLoading, error: unitsError, deleteUnit } = useUnits();
@@ -65,9 +66,9 @@ export default function UnitDetailScreen() {
         <Text style={styles.notFoundText}>
           {unitsError ?? 'This unit may have been deleted or you do not have access.'}
         </Text>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/(app)')}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => router.replace('/(app)')}>
           <Text style={styles.backBtnText}>BACK TO LIST</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
     );
   }
@@ -80,15 +81,15 @@ export default function UnitDetailScreen() {
     <>
       <Stack.Screen
         options={{
-          title: unit.name,
+          title: unit?.name ?? paramName ?? 'Unit',
           headerRight: () => (
             <View style={{ flexDirection: 'row', gap: 16, marginRight: 4 }}>
-              <TouchableOpacity onPress={() => router.push(`/(app)/unit/edit/${id}`)}>
+              <AnimatedPressable onPress={() => router.push(`/(app)/unit/edit/${id}`)}>
                 <Text style={{ color: ACCENT, fontFamily: 'monospace', fontSize: 11 }}>EDIT</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDelete}>
+              </AnimatedPressable>
+              <AnimatedPressable onPress={handleDelete}>
                 <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 11 }}>DELETE</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           ),
         }}
@@ -183,13 +184,15 @@ export default function UnitDetailScreen() {
           </View>
         )}
 
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.arBtn}
           onPress={() => router.push(`/(app)/camera/${id}`)}
         >
-          <Text style={styles.arBtnText}>LAUNCH AR PREVIEW</Text>
-        </TouchableOpacity>
+          <Text style={styles.arBtnText}>LAUNCH AR VIEW</Text>
+        </AnimatedPressable>
       </ScrollView>
+
+      <ScreenLoader ready={!!unit} />
     </>
   );
 }
