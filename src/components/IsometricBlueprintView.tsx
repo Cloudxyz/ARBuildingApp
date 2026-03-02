@@ -9,9 +9,6 @@ import {
 } from 'react-native';
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl';
 import { Renderer } from 'expo-three';
-import { Asset } from 'expo-asset';
-import { loadArrayBufferAsync } from 'expo-three/build/loaders/loadModelsAsync';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 import {
   useSharedValue,
@@ -23,6 +20,7 @@ import { BlueprintOverlay } from './BlueprintOverlay';
 import { FloatingParticles } from './FloatingParticles';
 import { GroundShadow } from './GroundShadow';
 import { BuildingConfig } from '../types';
+import { loadTexturelessGlb, disposeObject3D, disposeRenderer, rafLoopStats, logGlbStats } from '../lib/glbLoader';
 
 const PIXEL_TO_WORLD = 1 / 18;
 const FLOOR_BUILD_SEC = 0.7 / 6; // blueprint speed x6
@@ -117,170 +115,6 @@ function getProjectedBoxExtents(
   });
 
   return { minX, maxX, minY, maxY };
-}
-
-function removeTextureRefsDeep(node: unknown): void {
-  if (!node || typeof node !== 'object') return;
-  if (Array.isArray(node)) {
-    node.forEach(removeTextureRefsDeep);
-    return;
-  }
-
-  const obj = node as Record<string, unknown>;
-  for (const key of Object.keys(obj)) {
-    const value = obj[key];
-    const lower = key.toLowerCase();
-
-    if (
-      lower.includes('texture') &&
-      value &&
-      typeof value === 'object' &&
-      typeof (value as { index?: unknown }).index === 'number'
-    ) {
-      delete obj[key];
-      continue;
-    }
-    removeTextureRefsDeep(value);
-  }
-}
-
-function stripEmbeddedTexturesFromGlb(source: ArrayBuffer): ArrayBuffer {
-  const data = new DataView(source);
-  if (data.byteLength < 20 || data.getUint32(0, true) !== 0x46546c67) {
-    throw new Error('Invalid GLB header');
-  }
-
-  const JSON_CHUNK_TYPE = 0x4e4f534a;
-  const BIN_CHUNK_TYPE = 0x004e4942;
-  const pad4 = (n: number) => (n + 3) & ~3;
-
-  let offset = 12;
-  let jsonChunk: Uint8Array | null = null;
-  let binChunk: Uint8Array | null = null;
-
-  while (offset + 8 <= data.byteLength) {
-    const chunkLength = data.getUint32(offset, true);
-    const chunkType = data.getUint32(offset + 4, true);
-    const chunkStart = offset + 8;
-    const chunkEnd = chunkStart + chunkLength;
-    if (chunkEnd > data.byteLength) break;
-
-    const bytes = new Uint8Array(source.slice(chunkStart, chunkEnd));
-    if (chunkType === JSON_CHUNK_TYPE) {
-      jsonChunk = bytes;
-    } else if (chunkType === BIN_CHUNK_TYPE && !binChunk) {
-      binChunk = bytes;
-    }
-
-    offset = chunkEnd;
-  }
-
-  if (!jsonChunk) {
-    throw new Error('GLB JSON chunk not found');
-  }
-
-  const jsonText = new TextDecoder().decode(jsonChunk).trim();
-  const gltf = JSON.parse(jsonText) as Record<string, unknown>;
-
-  delete gltf.images;
-  delete gltf.textures;
-  delete gltf.samplers;
-  removeTextureRefsDeep(gltf);
-
-  if (Array.isArray(gltf.extensionsUsed)) {
-    gltf.extensionsUsed = (gltf.extensionsUsed as unknown[]).filter((name) => {
-      if (typeof name !== 'string') return true;
-      return !name.toLowerCase().includes('texture');
-    });
-  }
-  if (Array.isArray(gltf.extensionsRequired)) {
-    gltf.extensionsRequired = (gltf.extensionsRequired as unknown[]).filter((name) => {
-      if (typeof name !== 'string') return true;
-      return !name.toLowerCase().includes('texture');
-    });
-  }
-
-  const encodedJson = new TextEncoder().encode(JSON.stringify(gltf));
-  const jsonPaddedLength = pad4(encodedJson.length);
-  const binLength = binChunk ? binChunk.length : 0;
-  const binPaddedLength = pad4(binLength);
-
-  const totalLength =
-    12 +
-    8 + jsonPaddedLength +
-    (binChunk ? 8 + binPaddedLength : 0);
-
-  const out = new ArrayBuffer(totalLength);
-  const outView = new DataView(out);
-  const outBytes = new Uint8Array(out);
-
-  outView.setUint32(0, 0x46546c67, true);
-  outView.setUint32(4, 2, true);
-  outView.setUint32(8, totalLength, true);
-
-  let outOffset = 12;
-
-  outView.setUint32(outOffset, jsonPaddedLength, true);
-  outView.setUint32(outOffset + 4, JSON_CHUNK_TYPE, true);
-  outOffset += 8;
-  outBytes.set(encodedJson, outOffset);
-  outBytes.fill(0x20, outOffset + encodedJson.length, outOffset + jsonPaddedLength);
-  outOffset += jsonPaddedLength;
-
-  if (binChunk) {
-    outView.setUint32(outOffset, binPaddedLength, true);
-    outView.setUint32(outOffset + 4, BIN_CHUNK_TYPE, true);
-    outOffset += 8;
-    outBytes.set(binChunk, outOffset);
-  }
-
-  return out;
-}
-
-type ModelSource = number | string;
-
-/** Max GLB bytes we'll attempt to load — guard against native OOM on Android. */
-const MAX_GLB_BYTES = 20 * 1024 * 1024;
-
-async function assertRemoteSizeOk(uri: string): Promise<void> {
-  if (!uri.startsWith('http')) return;
-  try {
-    const res = await fetch(uri, { method: 'HEAD' });
-    const len = res.headers.get('content-length');
-    if (len) {
-      const bytes = parseInt(len, 10);
-      if (!isNaN(bytes) && bytes > MAX_GLB_BYTES) {
-        const mb = (bytes / 1024 / 1024).toFixed(1);
-        throw new Error(
-          `GLB file is too large (${mb} MB). Compress to under 20 MB before uploading.`,
-        );
-      }
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('too large')) throw err;
-  }
-}
-
-async function loadTexturelessGlbAsync(modelSource: ModelSource): Promise<unknown> {
-  let uri: string;
-  if (typeof modelSource === 'string') {
-    await assertRemoteSizeOk(modelSource);
-    uri = modelSource;
-  } else {
-    const asset = Asset.fromModule(modelSource);
-    await asset.downloadAsync();
-    const localUri = asset.localUri ?? asset.uri;
-    if (!localUri) throw new Error('Model asset URI is unavailable');
-    uri = localUri;
-  }
-
-  const sourceArrayBuffer = await loadArrayBufferAsync({ uri, onProgress: undefined });
-  const texturelessArrayBuffer = stripEmbeddedTexturesFromGlb(sourceArrayBuffer as ArrayBuffer);
-
-  const loader = new GLTFLoader();
-  return await new Promise((resolve, reject) => {
-    loader.parse(texturelessArrayBuffer, '', resolve, reject);
-  });
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
@@ -421,6 +255,8 @@ export const IsometricBlueprintView: React.FC<Props> = ({
   const completionSentRef = useRef(false);
   const contextSessionRef = useRef(0);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
   const azimuthRef = useRef(BLUEPRINT_VIEW_AZIMUTH);
   const elevationRef = useRef(BLUEPRINT_VIEW_ELEVATION);
   const cameraDistRef = useRef(0);
@@ -584,6 +420,8 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     const sessionId = contextSessionRef.current + 1;
     contextSessionRef.current = sessionId;
     cancelAnimationFrame(raffRef.current);
+    rafLoopStats.active += 1;
+    if (__DEV__) console.log(`[IsometricBlueprintView] GL session #${sessionId} start, activeRAF=${rafLoopStats.active}`);
     setIsGlReady(false);
 
     const bufW = gl.drawingBufferWidth;
@@ -597,8 +435,10 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     renderer.setViewport(0, 0, bufW, bufH);
     renderer.setClearColor(0x000000, 0);
     renderer.localClippingEnabled = true;
+    rendererRef.current = renderer as unknown as THREE.WebGLRenderer;
 
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     scene.add(new THREE.AmbientLight(0xffffff, 1.0));
     const blueprintGrid = createBlueprintGrid({
       size: BLUEPRINT_GRID_WORLD_SIZE,
@@ -637,9 +477,9 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     let modelRoot: THREE.Group;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const modelSource: ModelSource = modelUri?.trim() ? modelUri.trim() : MODEL_ASSET;
+      const modelSource = modelUri?.trim() ? modelUri.trim() : MODEL_ASSET;
       const gltf: any = await withTimeout(
-        loadTexturelessGlbAsync(modelSource),
+        loadTexturelessGlb(modelSource),
         MODEL_LOAD_TIMEOUT_MS,
         'Blueprint GLB loading timed out',
       );
@@ -903,6 +743,10 @@ export const IsometricBlueprintView: React.FC<Props> = ({
   useEffect(() => () => {
     contextSessionRef.current += 1;
     cancelAnimationFrame(raffRef.current);
+    if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
+    if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
+    rafLoopStats.active -= 1;
+    if (__DEV__) logGlbStats();
   }, []);
 
   return (

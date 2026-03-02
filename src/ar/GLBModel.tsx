@@ -14,10 +14,8 @@ import Animated from 'react-native-reanimated';
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl';
 import { Renderer } from 'expo-three';
 import * as THREE from 'three';
-import { Asset } from 'expo-asset';
-import { loadArrayBufferAsync } from 'expo-three/build/loaders/loadModelsAsync';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ARModelConfig } from '../types';
+import { loadTexturelessGlb, disposeObject3D, disposeRenderer, rafLoopStats, logGlbStats } from '../lib/glbLoader';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 interface GLBModelProps {
@@ -157,6 +155,9 @@ export const GLBModel: React.FC<GLBModelProps> = ({
 
   const isPlayingRef = useRef(isPlaying);
   const raffRef      = useRef<number>(0);
+  const contextSessionRef = useRef(0);
+  const rendererRef  = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef     = useRef<THREE.Scene | null>(null);
 
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
@@ -167,12 +168,20 @@ export const GLBModel: React.FC<GLBModelProps> = ({
         return;
       }
 
+      const sessionId = contextSessionRef.current + 1;
+      contextSessionRef.current = sessionId;
+      cancelAnimationFrame(raffRef.current);
+      rafLoopStats.active += 1;
+      if (__DEV__) console.log(`[GLBModel] GL session #${sessionId} start, activeRAF=${rafLoopStats.active}`);
+
       try {
         const renderer = new Renderer({ gl, width, height, pixelRatio: 1, alpha: true });
         renderer.setSize(width, height);
         renderer.setClearColor(0x000000, 0);
+        rendererRef.current = renderer as unknown as THREE.WebGLRenderer;
 
         const scene  = new THREE.Scene();
+        sceneRef.current = scene;
         const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 200);
         camera.position.set(0, 7, 9);
         camera.lookAt(0, 2, 0);
@@ -182,19 +191,9 @@ export const GLBModel: React.FC<GLBModelProps> = ({
         dirLight.position.set(4, 10, 6);
         scene.add(ambient, dirLight);
 
-        // Load the GLB asset
-        const asset = Asset.fromModule(source);
-        await asset.downloadAsync();
-        const uri = asset.localUri ?? asset.uri;
-        if (!uri) throw new Error('Model asset URI is unavailable');
-        const sourceArrayBuffer = await loadArrayBufferAsync({ uri, onProgress: undefined });
-        const texturelessArrayBuffer = stripEmbeddedTexturesFromGlb(
-          sourceArrayBuffer as ArrayBuffer,
-        );
-        const loader = new GLTFLoader();
-        const gltf: any = await new Promise((resolve, reject) => {
-          loader.parse(texturelessArrayBuffer, '', resolve, reject);
-        });
+        // Load the GLB asset (via shared loader — result cached by URI)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const gltf: any = await loadTexturelessGlb(source);
 
         const model = gltf.scene ?? gltf;
         // Auto-scale to fit ~3 world units
@@ -209,6 +208,7 @@ export const GLBModel: React.FC<GLBModelProps> = ({
         setGlbLoaded(true);
 
         const animate = () => {
+          if (contextSessionRef.current !== sessionId) return;
           raffRef.current = requestAnimationFrame(animate);
           if (isPlayingRef.current) model.rotation.y += 0.005;
           renderer.render(scene, camera);
@@ -224,7 +224,14 @@ export const GLBModel: React.FC<GLBModelProps> = ({
     [] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  useEffect(() => () => { cancelAnimationFrame(raffRef.current); }, []);
+  useEffect(() => () => {
+    contextSessionRef.current += 1;
+    cancelAnimationFrame(raffRef.current);
+    if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
+    if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
+    rafLoopStats.active -= 1;
+    if (__DEV__) logGlbStats();
+  }, []);
 
   // Error state — no fallback, show message only
   if (errorMsg) {
