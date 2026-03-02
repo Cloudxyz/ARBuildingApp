@@ -33,7 +33,7 @@ import {
   LayoutChangeEvent,
   useWindowDimensions,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useIsFocused } from 'expo-router';
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -72,6 +72,7 @@ const LAND_PREVIEW_TYPES: Array<Exclude<UnitType, 'land'>> = [
 
 // -- Screen -------------------------------------------------------------------
 export default function UnitARPreviewScreen() {
+  const isFocused = useIsFocused();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { units } = useUnits();
   const unit = units.find((u) => u.id === id);
@@ -487,24 +488,26 @@ export default function UnitARPreviewScreen() {
                   style={[StyleSheet.absoluteFill, viewMode !== 'blueprint' && styles.hiddenLayer]}
                   pointerEvents={viewMode === 'blueprint' ? 'auto' : 'none'}
                 >
-                  <IsometricBlueprintView
-                    key={`unit-bp-${id}-${config.floorCount}-${config.footprintW}-${config.footprintH}-${resolvedModelUri ?? 'default'}`}
-                    config={{
-                      floorCount:   config.floorCount,
-                      scale:        config.scale,
-                      rotationDeg:  config.rotationDeg,
-                      buildingType: config.buildingType,
-                      footprintW:   config.footprintW,
-                      footprintH:   config.footprintH,
-                      colorScheme:  config.colorScheme,
-                    }}
-                    modelUri={resolvedModelUri}
-                    active={blueprintIsPlaying || blueprintCompleted}
-                    animKey={blueprintAnimKey}
-                    containerWidth={width}
-                    containerHeight={previewH}
-                    onBuildComplete={handleBlueprintBuildComplete}
-                  />
+                  {isFocused && (
+                    <IsometricBlueprintView
+                      key={`unit-bp-${id}-${config.floorCount}-${config.footprintW}-${config.footprintH}-${resolvedModelUri ?? 'default'}`}
+                      config={{
+                        floorCount:   config.floorCount,
+                        scale:        config.scale,
+                        rotationDeg:  config.rotationDeg,
+                        buildingType: config.buildingType,
+                        footprintW:   config.footprintW,
+                        footprintH:   config.footprintH,
+                        colorScheme:  config.colorScheme,
+                      }}
+                      modelUri={resolvedModelUri}
+                      active={blueprintIsPlaying || blueprintCompleted}
+                      animKey={blueprintAnimKey}
+                      containerWidth={width}
+                      containerHeight={previewH}
+                      onBuildComplete={handleBlueprintBuildComplete}
+                    />
+                  )}
                   <BuildIdlePlaceholder visible={!blueprintIsPlaying && !blueprintCompleted} />
                 </View>
 
@@ -513,21 +516,23 @@ export default function UnitARPreviewScreen() {
                   style={[StyleSheet.absoluteFill, viewMode !== '3d' && styles.hiddenLayer]}
                   pointerEvents={viewMode === '3d' ? 'auto' : 'none'}
                 >
-                  <Building3DOverlay
-                    key={`unit-3d-${id}-${unit?.unit_type ?? 'na'}-${landPreviewType}-${resolvedModelUri ?? 'default'}`}
-                    config={config}
-                    isPlaying={view3dIsPlaying}
-                    animKey={view3dAnimKey}
-                    modelUri={resolvedModelUri}
-                    active={viewMode === '3d'}
-                    width={width}
-                    height={previewH}
-                    zoomCommandId={view3dZoomCmdId}
-                    zoomCommandDir={view3dZoomCmdDir}
-                    zoomHoldDir={view3dZoomHoldDir}
-                    onZoomMetrics={handle3dZoomMetrics}
-                    onBuildComplete={handle3dBuildComplete}
-                  />
+                  {isFocused && (
+                    <Building3DOverlay
+                      key={`unit-3d-${id}-${unit?.unit_type ?? 'na'}-${landPreviewType}-${resolvedModelUri ?? 'default'}`}
+                      config={config}
+                      isPlaying={view3dIsPlaying}
+                      animKey={view3dAnimKey}
+                      modelUri={resolvedModelUri}
+                      active={viewMode === '3d'}
+                      width={width}
+                      height={previewH}
+                      zoomCommandId={view3dZoomCmdId}
+                      zoomCommandDir={view3dZoomCmdDir}
+                      zoomHoldDir={view3dZoomHoldDir}
+                      onZoomMetrics={handle3dZoomMetrics}
+                      onBuildComplete={handle3dBuildComplete}
+                    />
+                  )}
                   <BuildIdlePlaceholder visible={!view3dIsPlaying && !view3dCompleted && resolvedModelUri !== null} />
                   <NoModelPlaceholder
                     visible={resolvedModelUri === null}

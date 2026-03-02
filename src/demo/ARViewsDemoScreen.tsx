@@ -33,6 +33,7 @@ import { Building3DOverlay } from '../ar/Building3DOverlay';
 import MagicCanvasMode, { type MagicBuildPanelState } from '../magic/MagicCanvasMode';
 import { ARModelConfig } from '../types';
 import { DEFAULT_AR_CONFIG } from '../ar/useARBuildingModel';
+import { useIsFocused } from 'expo-router';
 
 type DemoViewMode = 'blueprint' | '3d' | 'magic3d';
 
@@ -46,6 +47,7 @@ const VIEW3D_FLOOR_BUILD_SEC = 0.8;
 const BLUEPRINT_FLOOR_BUILD_SEC = 0.7 / 6;
 
 export default function ARViewsDemoScreen() {
+  const isFocused = useIsFocused();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [viewMode, setViewMode] = useState<DemoViewMode>('blueprint');
@@ -448,23 +450,25 @@ export default function ARViewsDemoScreen() {
                 style={[StyleSheet.absoluteFill, viewMode !== 'blueprint' && styles.hiddenLayer]}
                 pointerEvents={viewMode === 'blueprint' ? 'auto' : 'none'}
               >
-                <IsometricBlueprintView
-                  key={`demo-bp-shape-${config.floorCount}-${config.footprintW}-${config.footprintH}`}
-                  config={{
-                    floorCount: config.floorCount,
-                    scale: config.scale,
-                    rotationDeg: config.rotationDeg,
-                    buildingType: config.buildingType,
-                    footprintW: config.footprintW,
-                    footprintH: config.footprintH,
-                    colorScheme: config.colorScheme,
-                  }}
-                  active={blueprintIsPlaying || blueprintCompleted}
-                  animKey={blueprintAnimKey}
-                  containerWidth={width}
-                  containerHeight={previewH}
-                  onBuildComplete={handleBlueprintBuildComplete}
-                />
+                {isFocused && (
+                  <IsometricBlueprintView
+                    key={`demo-bp-shape-${config.floorCount}-${config.footprintW}-${config.footprintH}`}
+                    config={{
+                      floorCount: config.floorCount,
+                      scale: config.scale,
+                      rotationDeg: config.rotationDeg,
+                      buildingType: config.buildingType,
+                      footprintW: config.footprintW,
+                      footprintH: config.footprintH,
+                      colorScheme: config.colorScheme,
+                    }}
+                    active={blueprintIsPlaying || blueprintCompleted}
+                    animKey={blueprintAnimKey}
+                    containerWidth={width}
+                    containerHeight={previewH}
+                    onBuildComplete={handleBlueprintBuildComplete}
+                  />
+                )}
                 <BuildIdlePlaceholder visible={!blueprintIsPlaying && !blueprintCompleted} />
               </View>
 
@@ -472,19 +476,21 @@ export default function ARViewsDemoScreen() {
                 style={[StyleSheet.absoluteFill, viewMode !== '3d' && styles.hiddenLayer]}
                 pointerEvents={viewMode === '3d' ? 'auto' : 'none'}
               >
-                <Building3DOverlay
-                  config={config}
-                  isPlaying={view3dIsPlaying}
-                  animKey={view3dAnimKey}
-                  active={viewMode === '3d'}
-                  width={width}
-                  height={previewH}
-                  zoomCommandId={view3dZoomCmdId}
-                  zoomCommandDir={view3dZoomCmdDir}
-                  zoomHoldDir={view3dZoomHoldDir}
-                  onZoomMetrics={handle3dZoomMetrics}
-                  onBuildComplete={handle3dBuildComplete}
-                />
+                {isFocused && (
+                  <Building3DOverlay
+                    config={config}
+                    isPlaying={view3dIsPlaying}
+                    animKey={view3dAnimKey}
+                    active={viewMode === '3d'}
+                    width={width}
+                    height={previewH}
+                    zoomCommandId={view3dZoomCmdId}
+                    zoomCommandDir={view3dZoomCmdDir}
+                    zoomHoldDir={view3dZoomHoldDir}
+                    onZoomMetrics={handle3dZoomMetrics}
+                    onBuildComplete={handle3dBuildComplete}
+                  />
+                )}
                 <BuildIdlePlaceholder visible={!view3dIsPlaying && !view3dCompleted} />
               </View>
             </View>
