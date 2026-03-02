@@ -42,14 +42,16 @@ import {
 import { useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useUnitTypeModels, useUnits } from '../../../src/hooks/useUnits';
+import { useUnitGlbModels, useUnits } from '../../../src/hooks/useUnits';
 import { IsometricBlueprintView } from '../../../src/components/IsometricBlueprintView';
+import { BuildIdlePlaceholder } from '../../../src/components/BuildIdlePlaceholder';
+import { NoModelPlaceholder } from '../../../src/components/NoModelPlaceholder';
 import { Building3DOverlay } from '../../../src/ar/Building3DOverlay';
 import MagicCanvasMode, {
   type MagicBuildPanelState,
 } from '../../../src/magic/MagicCanvasMode';
 import { useARBuildingModel } from '../../../src/ar/useARBuildingModel';
-import { ARViewMode, UnitType } from '../../../src/types';
+import { ARViewMode, UnitType, resolveGlbSource } from '../../../src/types';
 
 // -- Constants ----------------------------------------------------------------
 const ACCENT     = '#00d4ff';
@@ -74,29 +76,22 @@ export default function UnitARPreviewScreen() {
   const { units } = useUnits();
   const unit = units.find((u) => u.id === id);
 
-  const {
-    modelsByType: unitTypeModels,
-    loading: unitTypeModelsLoading,
-    error: unitTypeModelsError,
-  } = useUnitTypeModels();
+  // Per-unit, per-type GLB models (Phase 1 data)
+  const { byType } = useUnitGlbModels(id ?? '');
 
   const [landPreviewType, setLandPreviewType] =
     useState<Exclude<UnitType, 'land'>>('house');
-  const selectedLandTypeModel = unitTypeModels[landPreviewType];
 
-  // Resolve model URI: land units use type-model, others use their own model
+  // Resolve model URI using per-unit GLB records
+  // land unit → resolve from the selected land-preview sub-type
+  // non-land  → resolve from the unit's own type
   const resolvedModelUri = useMemo(() => {
     if (!unit) return null;
     if (unit.unit_type === 'land') {
-      return (
-        selectedLandTypeModel?.model_glb_url ??
-        selectedLandTypeModel?.external_model_glb_url ??
-        unit.model_glb_url ??
-        null
-      );
+      return resolveGlbSource(byType, landPreviewType);
     }
-    return unit.model_glb_url ?? null;
-  }, [selectedLandTypeModel, unit]);
+    return resolveGlbSource(byType, unit.unit_type);
+  }, [byType, unit, landPreviewType]);
 
   // -- Layout -----------------------------------------------------------------
   const { width, height } = useWindowDimensions();
@@ -419,7 +414,6 @@ export default function UnitARPreviewScreen() {
       <Stack.Screen
         options={{
           title: unit?.name ?? 'AR Preview',
-          headerTransparent: true,
           headerTintColor: ACCENT,
         }}
       />
@@ -494,7 +488,7 @@ export default function UnitARPreviewScreen() {
                   pointerEvents={viewMode === 'blueprint' ? 'auto' : 'none'}
                 >
                   <IsometricBlueprintView
-                    key={`unit-bp-${id}-${config.floorCount}-${config.footprintW}-${config.footprintH}`}
+                    key={`unit-bp-${id}-${config.floorCount}-${config.footprintW}-${config.footprintH}-${resolvedModelUri ?? 'default'}`}
                     config={{
                       floorCount:   config.floorCount,
                       scale:        config.scale,
@@ -504,12 +498,14 @@ export default function UnitARPreviewScreen() {
                       footprintH:   config.footprintH,
                       colorScheme:  config.colorScheme,
                     }}
+                    modelUri={resolvedModelUri}
                     active={blueprintIsPlaying || blueprintCompleted}
                     animKey={blueprintAnimKey}
                     containerWidth={width}
                     containerHeight={previewH}
                     onBuildComplete={handleBlueprintBuildComplete}
                   />
+                  <BuildIdlePlaceholder visible={!blueprintIsPlaying && !blueprintCompleted} />
                 </View>
 
                 {/* 3D + unit model */}
@@ -531,6 +527,11 @@ export default function UnitARPreviewScreen() {
                     zoomHoldDir={view3dZoomHoldDir}
                     onZoomMetrics={handle3dZoomMetrics}
                     onBuildComplete={handle3dBuildComplete}
+                  />
+                  <BuildIdlePlaceholder visible={!view3dIsPlaying && !view3dCompleted && resolvedModelUri !== null} />
+                  <NoModelPlaceholder
+                    visible={resolvedModelUri === null}
+                    unitType={unit?.unit_type === 'land' ? landPreviewType : (unit?.unit_type ?? 'land')}
                   />
                 </View>
 
@@ -720,7 +721,6 @@ const styles = StyleSheet.create({
   togglePillBar: {
     width: '100%', alignItems: 'center', paddingVertical: 8,
     backgroundColor: BG, borderBottomWidth: 1, borderBottomColor: BORDER,
-    paddingTop: Platform.OS === 'ios' ? 100 : 70,
   },
   togglePill: {
     flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.85)',

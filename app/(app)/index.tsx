@@ -424,6 +424,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ff2f45',
     justifyContent: 'center',
     alignItems: 'center',
+    transform: [{ translateY: -3 }],
   },
   deleteBtnText: {
     color: '#ffffff',

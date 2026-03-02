@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
-import { useUnitModel, useUnits } from '../../../src/hooks/useUnits';
+import { useUnitGlbModels, useUnitModel, useUnits } from '../../../src/hooks/useUnits';
+import { UnitType, resolveGlbSource } from '../../../src/types';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
@@ -34,6 +35,7 @@ export default function UnitDetailScreen() {
   const { model, loading: modelLoading } = useUnitModel(id);
 
   const unit = units.find((u) => u.id === id);
+  const { byType: glbByType } = useUnitGlbModels(id);
 
   const handleDelete = useCallback(() => {
     Alert.alert('Delete Unit', `Delete "${unit?.name}"? This cannot be undone.`, [
@@ -81,9 +83,14 @@ export default function UnitDetailScreen() {
         options={{
           title: unit.name,
           headerRight: () => (
-            <TouchableOpacity onPress={handleDelete} style={{ marginRight: 4 }}>
-              <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 11 }}>DELETE</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 16, marginRight: 4 }}>
+              <TouchableOpacity onPress={() => router.push(`/(app)/unit/edit/${id}`)}>
+                <Text style={{ color: ACCENT, fontFamily: 'monospace', fontSize: 11 }}>EDIT</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleDelete}>
+                <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 11 }}>DELETE</Text>
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />
@@ -103,11 +110,33 @@ export default function UnitDetailScreen() {
           <InfoRow label="Name" value={unit.name} />
           <InfoRow label="Unit Type" value={unit.unit_type?.toUpperCase()} />
           <InfoRow label="Area" value={unit.area_sqm ? `${unit.area_sqm.toLocaleString()} m2` : null} />
+          {/* Per-type GLB model indicators */}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>3D Models</Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {(['land', 'house', 'building', 'commercial'] as UnitType[]).map((t) => {
+                const has = !!resolveGlbSource(glbByType, t);
+                return (
+                  <View key={t} style={{ alignItems: 'center', gap: 3 }}>
+                    <View style={{
+                      width: 7, height: 7, borderRadius: 4,
+                      backgroundColor: has ? '#00ff88' : '#222244',
+                    }} />
+                    <Text style={{
+                      color: has ? '#00ff88' : '#333355',
+                      fontSize: 7, fontFamily: 'monospace',
+                    }}>
+                      {t[0].toUpperCase()}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
           <InfoRow label="Address" value={unit.address} />
           <InfoRow label="City" value={unit.city} />
           <InfoRow label="State" value={unit.state} />
           <InfoRow label="Country" value={unit.country} />
-          <InfoRow label="GLB Model URL" value={unit.model_glb_url} />
           {unit.description ? (
             <View style={styles.descBox}>
               <Text style={styles.infoLabel}>Description</Text>

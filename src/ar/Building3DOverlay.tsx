@@ -198,8 +198,43 @@ async function resolveModelUriAsync(modelSource: ModelSource): Promise<string> {
   return uri;
 }
 
+/** Max GLB file size we'll attempt to load (bytes). Android JVM heap is too small for larger files. */
+const MAX_GLB_BYTES = 20 * 1024 * 1024; // 20 MB
+
+/**
+ * For remote URIs, issue a HEAD request to check Content-Length before
+ * attempting a full download.  Throws early with a clear message if the
+ * file exceeds MAX_GLB_BYTES, saving time and preventing a native OOM crash.
+ */
+async function assertRemoteSizeOk(uri: string): Promise<void> {
+  if (!uri.startsWith('http')) return; // local file — skip
+  try {
+    const res = await fetch(uri, { method: 'HEAD' });
+    const len = res.headers.get('content-length');
+    if (len) {
+      const bytes = parseInt(len, 10);
+      if (!isNaN(bytes) && bytes > MAX_GLB_BYTES) {
+        const mb = (bytes / 1024 / 1024).toFixed(1);
+        throw new Error(
+          `GLB file is too large for this device (${mb} MB).\n\n`
+          + 'Compress it to under 20 MB before uploading.\n\n'
+          + 'Tools:\n'
+          + '\u2022 gltf.report (browser, free)\n'
+          + '\u2022 gltf-transform optimize (CLI)\n'
+          + '\u2022 Blender \u2192 Export glTF 2.0 + Draco',
+        );
+      }
+    }
+  } catch (err) {
+    // Re-throw our own size errors; swallow network/HEAD errors (server may not support HEAD)
+    if (err instanceof Error && err.message.includes('too large')) throw err;
+  }
+}
+
 async function loadTexturelessGlbAsync(modelSource: ModelSource): Promise<unknown> {
   const uri = await resolveModelUriAsync(modelSource);
+
+  await assertRemoteSizeOk(uri);
 
   const sourceArrayBuffer = await loadArrayBufferAsync({ uri, onProgress: undefined });
   const texturelessArrayBuffer = stripEmbeddedTexturesFromGlb(sourceArrayBuffer as ArrayBuffer);
@@ -696,8 +731,17 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
       modelRoot = (gltf.scene ?? gltf) as THREE.Group;
       if (DEBUG) console.log('[Building3DOverlay] GLB loaded via textureless parser');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[Building3DOverlay] GLB load failed:', msg);
+      const raw = err instanceof Error ? err.message : String(err);
+      const isOOM = /byte allocation|out of memory|OutOfMemory|growth limit|free bytes/i.test(raw);
+      const msg = isOOM
+        ? 'GLB file is too large for this device.\n\n'
+          + 'Compress it to under 15 MB before uploading.\n\n'
+          + 'Tools:\n'
+          + '\u2022 gltf.report (browser, free)\n'
+          + '\u2022 gltf-transform optimize (CLI)\n'
+          + '\u2022 Blender \u2192 Export glTF 2.0 + Draco'
+        : raw;
+      console.error('[Building3DOverlay] GLB load failed:', raw);
       setErrorMsg(msg);
       setLoadState('error');
       return;
@@ -1104,7 +1148,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
       {loadState === 'error' && (
         <View style={styles.overlay} pointerEvents="none">
           <Text style={styles.errorText}>Model failed to load</Text>
-          <Text style={styles.errorDetail} numberOfLines={4}>{errorMsg}</Text>
+          <Text style={styles.errorDetail} numberOfLines={12}>{errorMsg}</Text>
         </View>
       )}
 

@@ -5,10 +5,14 @@ import {
   DevelopmentInsert,
   DevelopmentUpdate,
   Unit,
+  UnitGlbModel,
+  UnitGlbModelInsert,
+  UnitGlbModelUpdate,
   UnitInsert,
   UnitModel,
   UnitModelInsert,
   UnitModelUpdate,
+  UnitType,
   UnitTypeModel,
   UnitTypeModelInsert,
   UnitUpdate,
@@ -359,4 +363,120 @@ export function useUnitTypeModels() {
     upsertUnitTypeModel,
     deleteUnitTypeModel,
   };
+}
+
+// =============================================
+// useUnitGlbModels - per-unit, per-type GLB models
+// =============================================
+export function useUnitGlbModels(unitId: string) {
+  const [byType, setByType] = useState<Partial<Record<UnitType, UnitGlbModel>>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchGlbModels = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    const { data, error } = await supabase
+      .from('unit_glb_models')
+      .select('*')
+      .eq('unit_id', unitId);
+
+    if (error) {
+      setError(error.message);
+      setByType({});
+      setLoading(false);
+      return;
+    }
+
+    const rows = (data ?? []) as UnitGlbModel[];
+    const next: Partial<Record<UnitType, UnitGlbModel>> = {};
+    for (const row of rows) {
+      next[row.unit_type as UnitType] = row;
+    }
+    setByType(next);
+    setLoading(false);
+  }, [unitId]);
+
+  useEffect(() => {
+    fetchGlbModels();
+  }, [fetchGlbModels]);
+
+  /** Insert or update the GLB record for one unit type. */
+  const upsertGlbModel = useCallback(
+    async (
+      unitType: UnitType,
+      fields: { glbUrl?: string | null; storagePath?: string | null; externalGlbUrl?: string | null },
+    ): Promise<UnitGlbModel | null> => {
+      setError(null);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setError('Authentication required.');
+        return null;
+      }
+
+      const existing = byType[unitType];
+
+      const payload: UnitGlbModelInsert = {
+        unit_id: unitId,
+        unit_type: unitType,
+        glb_url: fields.glbUrl !== undefined ? fields.glbUrl : (existing?.glb_url ?? null),
+        storage_path: fields.storagePath !== undefined ? fields.storagePath : (existing?.storage_path ?? null),
+        external_glb_url:
+          fields.externalGlbUrl !== undefined ? fields.externalGlbUrl : (existing?.external_glb_url ?? null),
+      };
+
+      const { data, error } = existing
+        ? await supabase
+            .from('unit_glb_models')
+            .update(payload as UnitGlbModelUpdate)
+            .eq('id', existing.id)
+            .select()
+            .single()
+        : await supabase
+            .from('unit_glb_models')
+            .insert({ ...payload, user_id: user.id })
+            .select()
+            .single();
+
+      if (error) {
+        setError(error.message);
+        return null;
+      }
+
+      const row = data as UnitGlbModel;
+      setByType((prev) => ({ ...prev, [unitType]: row }));
+      return row;
+    },
+    [unitId, byType],
+  );
+
+  /** Remove the GLB record for one unit type. */
+  const deleteGlbModel = useCallback(
+    async (unitType: UnitType): Promise<boolean> => {
+      setError(null);
+
+      const existing = byType[unitType];
+      if (!existing) return true;
+
+      const { error } = await supabase.from('unit_glb_models').delete().eq('id', existing.id);
+      if (error) {
+        setError(error.message);
+        return false;
+      }
+
+      setByType((prev) => {
+        const next = { ...prev };
+        delete next[unitType];
+        return next;
+      });
+      return true;
+    },
+    [byType],
+  );
+
+  return { byType, loading, error, fetchGlbModels, upsertGlbModel, deleteGlbModel };
 }

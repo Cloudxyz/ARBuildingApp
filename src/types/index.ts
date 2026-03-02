@@ -159,3 +159,41 @@ export interface ARModelConfig {
 }
 
 export type ARViewMode = 'blueprint' | '3d' | 'magic3d';
+
+// =============================================
+// Per-unit, per-type GLB model record
+// =============================================
+export interface UnitGlbModel {
+  id: string;
+  unit_id: string;
+  user_id: string;
+  unit_type: UnitType;
+  glb_url: string | null;           // uploaded file public URL (priority)
+  storage_path: string | null;      // Supabase storage path for uploaded file
+  external_glb_url: string | null;  // manual fallback URL
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UnitGlbModelInsert {
+  unit_id: string;
+  unit_type: UnitType;
+  glb_url?: string | null;
+  storage_path?: string | null;
+  external_glb_url?: string | null;
+}
+
+export type UnitGlbModelUpdate = Partial<Omit<UnitGlbModelInsert, 'unit_id' | 'unit_type'>>;
+
+/**
+ * Resolves the best available GLB source for a given unit type.
+ * Priority: glb_url (uploaded file) → external_glb_url (manual URL) → null
+ */
+export function resolveGlbSource(
+  byType: Partial<Record<UnitType, UnitGlbModel>>,
+  type: UnitType,
+): string | null {
+  const record = byType[type];
+  if (!record) return null;
+  return record.glb_url ?? record.external_glb_url ?? null;
+}

@@ -153,6 +153,18 @@ interface Procedural3DBuildingProps {
     canZoomIn: boolean;
     canZoomOut: boolean;
   }) => void;
+  /** Called once when the build animation reaches 100%. */
+  onBuildComplete?: () => void;
+  /** Zoom factor applied immediately after the building geometry is framed (and on reset). Default: 1 (no extra zoom). */
+  initialZoom?: number;
+  /** Button-hold direction for azimuth (camera mode) / model-Y rotation (moveModel mode). */
+  manualAzimuthDir?: -1 | 0 | 1;
+  /** Button-hold direction for elevation (camera mode) / model-X rotation (moveModel mode). */
+  manualElevationDir?: -1 | 0 | 1;
+  /** Button-hold direction to translate the model/camera target vertically (+Y / -Y). */
+  manualMoveYDir?: -1 | 0 | 1;
+  /** When true, PanResponder touch gestures are disabled. */
+  gesturesDisabled?: boolean;
 }
 
 export interface Procedural3DDebugMetrics {
@@ -326,21 +338,15 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   zoomCommandDir = 'in',
   zoomHoldDir = 0,
   onZoomMetrics,
+  onBuildComplete,
+  initialZoom = 1,
+  manualAzimuthDir = 0,
+  manualElevationDir = 0,
+  manualMoveYDir = 0,
+  gesturesDisabled = false,
 }) => {
   const [glReady, setGlReady] = useState(false);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
-  const [modelMarker, setModelMarker] = useState({
-    visible: false,
-    x: 0,
-    y: 0,
-  });
-  const [modelBox, setModelBox] = useState({
-    visible: false,
-    x: 0,
-    y: 0,
-    w: 0,
-    h: 0,
-  });
 
   const raffRef      = useRef<number>(0);
   const cameraRef    = useRef<THREE.PerspectiveCamera | null>(null);
@@ -379,6 +385,7 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   const metricsTimeRef   = useRef(0);
   const onDebugMetricsRef = useRef(onDebugMetrics);
   const onZoomMetricsRef = useRef(onZoomMetrics);
+  const onBuildCompleteRef = useRef(onBuildComplete);
   const zoomCommandIdRef = useRef(zoomCommandId);
   const zoomCommandDirRef = useRef<'in' | 'out'>(zoomCommandDir);
   const zoomHoldDirRef = useRef<-1 | 0 | 1>(zoomHoldDir);
@@ -388,6 +395,11 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     canZoomIn: true,
     canZoomOut: true,
   });
+  const initialZoomRef        = useRef(initialZoom);
+  const manualAzimuthDirRef   = useRef<-1 | 0 | 1>(0);
+  const manualElevationDirRef = useRef<-1 | 0 | 1>(0);
+  const manualMoveYDirRef     = useRef<-1 | 0 | 1>(0);
+  const gesturesDisabledRef   = useRef(false);
   const wasActiveRef      = useRef(active);
   const latestMetricsRef  = useRef<Procedural3DDebugMetrics | null>(null);
   const movedModelInGestureRef = useRef(false);
@@ -400,6 +412,11 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   useEffect(() => { zoomCommandIdRef.current = zoomCommandId; }, [zoomCommandId]);
   useEffect(() => { zoomCommandDirRef.current = zoomCommandDir; }, [zoomCommandDir]);
   useEffect(() => { zoomHoldDirRef.current = zoomHoldDir; }, [zoomHoldDir]);
+  useEffect(() => { initialZoomRef.current        = initialZoom; }, [initialZoom]);
+  useEffect(() => { manualAzimuthDirRef.current   = manualAzimuthDir   as (-1 | 0 | 1); }, [manualAzimuthDir]);
+  useEffect(() => { manualElevationDirRef.current = manualElevationDir as (-1 | 0 | 1); }, [manualElevationDir]);
+  useEffect(() => { manualMoveYDirRef.current     = manualMoveYDir     as (-1 | 0 | 1); }, [manualMoveYDir]);
+  useEffect(() => { gesturesDisabledRef.current   = gesturesDisabled; }, [gesturesDisabled]);
   useEffect(() => {
     if (active) {
       warmupPendingRef.current = true;
@@ -837,6 +854,10 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         cameraTargetRef.current,
       );
       baseDistRef.current = distRef.current;
+      // Apply initial zoom: pull camera closer so zoom = initialZoom on first view
+      if (initialZoomRef.current > 1) {
+        distRef.current = Math.max(3, distRef.current / initialZoomRef.current);
+      }
       centerTargetByBBoxProjection(
         cam,
         centeredBox,
@@ -883,6 +904,10 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
           cameraTargetRef.current,
         );
         baseDistRef.current = distRef.current;
+        // Re-apply initial zoom on reset so the view returns to the same default
+        if (initialZoomRef.current > 1) {
+          distRef.current = Math.max(3, distRef.current / initialZoomRef.current);
+        }
         centerTargetByBBoxProjection(
           cam,
           bbox,
@@ -923,10 +948,10 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder:        () => true,
-        onMoveShouldSetPanResponder:         () => true,
-        onStartShouldSetPanResponderCapture: () => true,
-        onMoveShouldSetPanResponderCapture:  () => true,
+        onStartShouldSetPanResponder:        () => !gesturesDisabledRef.current,
+        onMoveShouldSetPanResponder:         () => !gesturesDisabledRef.current,
+        onStartShouldSetPanResponderCapture: () => !gesturesDisabledRef.current,
+        onMoveShouldSetPanResponderCapture:  () => !gesturesDisabledRef.current,
 
         onPanResponderGrant: (evt) => {
           const touches = evt.nativeEvent.touches;
@@ -1200,6 +1225,47 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         }
       }
 
+      // Manual button-driven rotation (camera orbit or model rotation)
+      const MANUAL_ROT_SPEED = 1.2; // radians per second
+      if (manualAzimuthDirRef.current !== 0 && dt > 0) {
+        if (interactionMode === 'moveModel') {
+          const g = buildingGroupRef.current;
+          if (g) {
+            g.rotation.y -= manualAzimuthDirRef.current * MANUAL_ROT_SPEED * dt;
+            g.updateMatrixWorld(true);
+          }
+        } else {
+          azimuthRef.current -= manualAzimuthDirRef.current * MANUAL_ROT_SPEED * dt;
+        }
+      }
+      if (manualElevationDirRef.current !== 0 && dt > 0) {
+        if (interactionMode === 'moveModel') {
+          const g = buildingGroupRef.current;
+          if (g) {
+            g.rotation.x = Math.max(-0.5, Math.min(0.5, g.rotation.x - manualElevationDirRef.current * MANUAL_ROT_SPEED * dt));
+            g.updateMatrixWorld(true);
+          }
+        } else {
+          elevationRef.current = Math.max(0.05, Math.min(1.48, elevationRef.current + manualElevationDirRef.current * MANUAL_ROT_SPEED * dt));
+        }
+      }
+
+      // Manual vertical translation (↑ ↓ buttons)
+      const MANUAL_MOVE_SPEED = 4; // world-units per second
+      if (manualMoveYDirRef.current !== 0 && dt > 0) {
+        if (interactionMode === 'moveModel') {
+          const g = buildingGroupRef.current;
+          if (g) {
+            g.position.y += manualMoveYDirRef.current * MANUAL_MOVE_SPEED * dt;
+            g.updateMatrixWorld(true);
+          }
+        } else {
+          cameraTargetRef.current.y = Math.max(-80, Math.min(80,
+            cameraTargetRef.current.y + manualMoveYDirRef.current * MANUAL_MOVE_SPEED * dt,
+          ));
+        }
+      }
+
       // Reset on new animKey
       if (animKeyRef.current !== loopKey) {
         loopKey           = animKeyRef.current;
@@ -1211,6 +1277,9 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
       const dur    = floors * FLOOR_BUILD_SEC;
       if (isPlayingRef.current && buildTRef.current < 1) {
         buildTRef.current = Math.min(1, buildTRef.current + dt / dur);
+        if (buildTRef.current >= 1) {
+          onBuildCompleteRef.current?.();
+        }
       }
 
       const t          = buildTRef.current;
@@ -1365,14 +1434,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
 
       if (time - metricsTimeRef.current > 120) {
         metricsTimeRef.current = time;
-        setModelMarker({ visible: true, x: modelScreenX, y: modelScreenY });
-        setModelBox({
-          visible: rectVisible,
-          x: rectX,
-          y: rectY,
-          w: rectW,
-          h: rectH,
-        });
         onDebugMetricsRef.current?.(liveMetrics);
       }
 
@@ -1406,37 +1467,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
       </View>
 
-      <View style={styles.debugLayer} pointerEvents="none">
-        <View style={styles.debugGlCross}>
-          <Text style={styles.debugGlCrossText}>X</Text>
-        </View>
-        {modelBox.visible && (
-          <View
-            style={[
-              styles.debugModelBox,
-              {
-                left: modelBox.x,
-                top: modelBox.y,
-                width: modelBox.w,
-                height: modelBox.h,
-              },
-            ]}
-          />
-        )}
-        {modelMarker.visible && (
-          <View
-            style={[
-              styles.debugModelCross,
-              {
-                left: modelMarker.x - 7,
-                top: modelMarker.y - 10,
-              },
-            ]}
-          >
-            <Text style={styles.debugModelCrossText}>X</Text>
-          </View>
-        )}
-      </View>
 
       {(!glReady || isWarmingUp) && (
         <View style={styles.loading} pointerEvents="none">
@@ -1455,41 +1485,7 @@ export default Procedural3DBuilding;
 
 const styles = StyleSheet.create({
   root: { overflow: 'hidden' },
-  debugLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  debugGlCross: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    marginLeft: -8,
-    marginTop: -12,
-  },
-  debugGlCrossText: {
-    color: '#44ddff',
-    fontSize: 20,
-    fontWeight: '900',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  debugModelBox: {
-    position: 'absolute',
-    borderWidth: 2,
-    borderColor: '#2b7bff',
-    backgroundColor: 'rgba(43,123,255,0.06)',
-  },
-  debugModelCross: {
-    position: 'absolute',
-  },
-  debugModelCrossText: {
-    color: '#ff5555',
-    fontSize: 20,
-    fontWeight: '900',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
+
   loading: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,10 +11,10 @@ import {
   Alert,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { useRouter, Stack } from 'expo-router';
-import { useDevelopments, useUnits } from '../../../src/hooks/useUnits';
-import { UnitInsert, UnitStatus, UnitType } from '../../../src/types';
-import { supabase } from '../../../src/lib/supabase';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useDevelopments, useUnitGlbModels, useUnits } from '../../../../src/hooks/useUnits';
+import { UnitInsert, UnitStatus, UnitType } from '../../../../src/types';
+import { supabase } from '../../../../src/lib/supabase';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
@@ -32,14 +32,19 @@ const STATUS_COLORS: Record<UnitStatus, string> = {
   sold: '#ff4444',
 };
 
-export default function CreateUnitScreen() {
+export default function EditUnitScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { createUnit } = useUnits();
+  const { units, updateUnit } = useUnits();
+  const unit = units.find((u) => u.id === id);
   const { developments, loading: developmentsLoading } = useDevelopments();
+
   const [loading, setLoading] = useState(false);
   const [devPickerVisible, setDevPickerVisible] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
-  // Per-type GLB drafts (keyed by UnitType)
+  // Per-type GLB models
+  const { byType, upsertGlbModel } = useUnitGlbModels(id ?? '');
   type TypeModelDraft = { glbUrl: string | null; storagePath: string | null; externalGlbUrl: string };
   const [activeModelType, setActiveModelType] = useState<UnitType>('land');
   const [uploadingModelType, setUploadingModelType] = useState<UnitType | null>(null);
@@ -49,6 +54,7 @@ export default function CreateUnitScreen() {
     building:   { glbUrl: null, storagePath: null, externalGlbUrl: '' },
     commercial: { glbUrl: null, storagePath: null, externalGlbUrl: '' },
   });
+  const [typeModelsInitialized, setTypeModelsInitialized] = useState(false);
 
   const [form, setForm] = useState<Partial<UnitInsert>>({
     name: '',
@@ -59,12 +65,51 @@ export default function CreateUnitScreen() {
     country: 'US',
     status: 'available',
     unit_type: 'land',
+    model_glb_url: '',
     development_id: null,
     area_sqm: undefined,
     price: undefined,
     latitude: undefined,
     longitude: undefined,
   });
+
+  // Pre-fill form once unit is available
+  useEffect(() => {
+    if (unit && !initialized) {
+      setForm({
+        name: unit.name ?? '',
+        description: unit.description ?? '',
+        address: unit.address ?? '',
+        city: unit.city ?? '',
+        state: unit.state ?? '',
+        country: unit.country ?? 'US',
+        status: unit.status ?? 'available',
+        unit_type: unit.unit_type ?? 'land',
+        model_glb_url: unit.model_glb_url ?? '',
+        development_id: unit.development_id ?? null,
+        area_sqm: unit.area_sqm ?? undefined,
+        price: unit.price ?? undefined,
+        latitude: unit.latitude ?? undefined,
+        longitude: unit.longitude ?? undefined,
+      });
+      setInitialized(true);
+    }
+  }, [unit, initialized]);
+
+  // Pre-fill typeModels once byType is loaded from DB
+  useEffect(() => {
+    if (typeModelsInitialized) return;
+    const types: UnitType[] = ['land', 'house', 'building', 'commercial'];
+    if (types.some((t) => byType[t] !== undefined)) {
+      setTypeModels({
+        land:       { glbUrl: byType.land?.glb_url ?? null,       storagePath: byType.land?.storage_path ?? null,       externalGlbUrl: byType.land?.external_glb_url ?? '' },
+        house:      { glbUrl: byType.house?.glb_url ?? null,      storagePath: byType.house?.storage_path ?? null,      externalGlbUrl: byType.house?.external_glb_url ?? '' },
+        building:   { glbUrl: byType.building?.glb_url ?? null,   storagePath: byType.building?.storage_path ?? null,   externalGlbUrl: byType.building?.external_glb_url ?? '' },
+        commercial: { glbUrl: byType.commercial?.glb_url ?? null, storagePath: byType.commercial?.storage_path ?? null, externalGlbUrl: byType.commercial?.external_glb_url ?? '' },
+      });
+      setTypeModelsInitialized(true);
+    }
+  }, [byType, typeModelsInitialized]);
 
   const setField = (key: keyof UnitInsert, value: string | number | null) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -98,7 +143,7 @@ export default function CreateUnitScreen() {
       const blob = await res.blob();
 
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `${user.id}/type-models/${type}/${Date.now()}_${safeName}`;
+      const storagePath = `${user.id}/units/${id}/${type}/${Date.now()}_${safeName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('unit-models')
@@ -125,7 +170,7 @@ export default function CreateUnitScreen() {
       return;
     }
     setLoading(true);
-    const unit = await createUnit({
+    const ok = await updateUnit(id, {
       name: form.name.trim(),
       description: form.description ?? null,
       address: form.address ?? null,
@@ -139,38 +184,39 @@ export default function CreateUnitScreen() {
       latitude: form.latitude ?? null,
       longitude: form.longitude ?? null,
       development_id: form.development_id ?? null,
-      thumbnail_url: null,
     });
-    if (unit) {
-      // Persist per-type GLB models now that we have a unit ID
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await Promise.all(
-          UNIT_TYPE_OPTIONS.map((type) => {
-            const draft = typeModels[type];
-            if (!draft.glbUrl && !draft.externalGlbUrl.trim()) return Promise.resolve();
-            return supabase.from('unit_glb_models').insert({
-              unit_id: unit.id,
-              user_id: user.id,
-              unit_type: type,
-              glb_url: draft.glbUrl ?? null,
-              storage_path: draft.storagePath ?? null,
-              external_glb_url: draft.externalGlbUrl.trim() || null,
-            });
-          }),
-        );
-      }
+    if (ok) {
+      // Upsert per-type GLB models
+      await Promise.all(
+        UNIT_TYPE_OPTIONS.map((type) => {
+          const draft = typeModels[type];
+          if (!draft.glbUrl && !draft.externalGlbUrl.trim()) return Promise.resolve();
+          return upsertGlbModel(type, {
+            glbUrl: draft.glbUrl ?? null,
+            storagePath: draft.storagePath ?? null,
+            externalGlbUrl: draft.externalGlbUrl.trim() || null,
+          });
+        }),
+      );
       setLoading(false);
-      router.replace({ pathname: '/(app)/unit/[id]', params: { id: unit.id } });
+      router.replace({ pathname: '/(app)/unit/[id]', params: { id } });
     } else {
       setLoading(false);
-      Alert.alert('Error', 'Could not save unit. Check your connection.');
+      Alert.alert('Error', 'Could not save changes. Check your connection.');
     }
   };
 
+  if (!unit) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={ACCENT} />
+      </View>
+    );
+  }
+
   return (
     <>
-      <Stack.Screen options={{ title: 'Add Unit' }} />
+      <Stack.Screen options={{ title: 'Edit Unit' }} />
       <ScrollView
         style={styles.root}
         contentContainerStyle={styles.content}
@@ -295,12 +341,6 @@ export default function CreateUnitScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        <TouchableOpacity
-          style={styles.manageTypesBtn}
-          onPress={() => router.push('/(app)/unit/type-models')}
-        >
-          <Text style={styles.manageTypesBtnText}>MANAGE TYPE MODELS</Text>
-        </TouchableOpacity>
 
         <Text style={styles.sectionLabel}>MODELS BY UNIT TYPE</Text>
         <View style={styles.statusRow}>
@@ -380,7 +420,11 @@ export default function CreateUnitScreen() {
           <ActivityIndicator color={ACCENT} style={{ marginVertical: 8 }} />
         ) : (
           <>
-            <TouchableOpacity style={styles.selectInput} onPress={() => setDevPickerVisible(true)} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={styles.selectInput}
+              onPress={() => setDevPickerVisible(true)}
+              activeOpacity={0.8}
+            >
               <Text
                 style={[
                   styles.selectInputText,
@@ -390,7 +434,7 @@ export default function CreateUnitScreen() {
               >
                 {selectedDevelopmentName}
               </Text>
-              <Text style={styles.selectChevron}>?</Text>
+              <Text style={styles.selectChevron}>▾</Text>
             </TouchableOpacity>
 
             <Modal
@@ -405,16 +449,12 @@ export default function CreateUnitScreen() {
                   onPress={() => setDevPickerVisible(false)}
                   activeOpacity={1}
                 />
-
                 <View style={styles.modalCard}>
                   <Text style={styles.modalTitle}>SELECT DEVELOPMENT</Text>
                   <ScrollView style={styles.modalList} contentContainerStyle={styles.modalListContent}>
                     <TouchableOpacity
                       style={[styles.modalOption, form.development_id == null && styles.modalOptionActive]}
-                      onPress={() => {
-                        setField('development_id', null);
-                        setDevPickerVisible(false);
-                      }}
+                      onPress={() => { setField('development_id', null); setDevPickerVisible(false); }}
                     >
                       <Text
                         style={[
@@ -425,15 +465,11 @@ export default function CreateUnitScreen() {
                         WITHOUT DEVELOPMENT
                       </Text>
                     </TouchableOpacity>
-
                     {developments.map((d) => (
                       <TouchableOpacity
                         key={d.id}
                         style={[styles.modalOption, form.development_id === d.id && styles.modalOptionActive]}
-                        onPress={() => {
-                          setField('development_id', d.id);
-                          setDevPickerVisible(false);
-                        }}
+                        onPress={() => { setField('development_id', d.id); setDevPickerVisible(false); }}
                       >
                         <Text
                           style={[
@@ -447,7 +483,6 @@ export default function CreateUnitScreen() {
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
-
                   <TouchableOpacity
                     style={styles.modalCloseBtn}
                     onPress={() => setDevPickerVisible(false)}
@@ -460,8 +495,12 @@ export default function CreateUnitScreen() {
           </>
         )}
 
-        <TouchableOpacity style={[styles.btn, loading && styles.btnDisabled]} onPress={handleSave} disabled={loading}>
-          {loading ? <ActivityIndicator color={BG} /> : <Text style={styles.btnText}>SAVE UNIT</Text>}
+        <TouchableOpacity
+          style={[styles.btn, loading && styles.btnDisabled]}
+          onPress={handleSave}
+          disabled={loading}
+        >
+          {loading ? <ActivityIndicator color={BG} /> : <Text style={styles.btnText}>SAVE CHANGES</Text>}
         </TouchableOpacity>
       </ScrollView>
     </>
@@ -471,6 +510,7 @@ export default function CreateUnitScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   content: { padding: 16, paddingBottom: 40 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: BG },
   sectionLabel: {
     color: FORM_TEXT,
     fontSize: 9,
@@ -503,22 +543,6 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,
   },
   statusBtnText: { color: FORM_TEXT, fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 },
-  manageTypesBtn: {
-    borderWidth: 1,
-    borderColor: INPUT_BORDER,
-    borderRadius: 8,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: CARD_BG,
-    marginBottom: 10,
-  },
-  manageTypesBtnText: {
-    color: ACCENT,
-    fontFamily: 'monospace',
-    fontSize: 10,
-    letterSpacing: 1.4,
-  },
   selectInput: {
     backgroundColor: CARD_BG,
     borderWidth: 1,
@@ -532,28 +556,16 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 10,
   },
-  selectInputText: {
-    flex: 1,
-    color: FORM_TEXT,
-    fontSize: 14,
-  },
-  selectInputPlaceholder: {
-    color: PLACEHOLDER,
-  },
-  selectChevron: {
-    color: ACCENT,
-    fontSize: 11,
-    fontFamily: 'monospace',
-  },
+  selectInputText: { flex: 1, color: FORM_TEXT, fontSize: 14 },
+  selectInputPlaceholder: { color: PLACEHOLDER },
+  selectChevron: { color: ACCENT, fontSize: 11, fontFamily: 'monospace' },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.58)',
     justifyContent: 'center',
     padding: 18,
   },
-  modalDismissLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  modalDismissLayer: { ...StyleSheet.absoluteFillObject },
   modalCard: {
     backgroundColor: CARD_BG,
     borderWidth: 1,
@@ -569,12 +581,8 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginBottom: 10,
   },
-  modalList: {
-    maxHeight: 280,
-  },
-  modalListContent: {
-    gap: 8,
-  },
+  modalList: { maxHeight: 280 },
+  modalListContent: { gap: 8 },
   modalOption: {
     borderWidth: 1,
     borderColor: INPUT_BORDER,
@@ -583,19 +591,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: CARD_BG,
   },
-  modalOptionActive: {
-    borderColor: ACCENT,
-    backgroundColor: 'rgba(0,212,255,0.12)',
-  },
-  modalOptionText: {
-    color: FORM_TEXT,
-    fontSize: 10,
-    fontFamily: 'monospace',
-    letterSpacing: 1,
-  },
-  modalOptionTextActive: {
-    color: ACCENT,
-  },
+  modalOptionActive: { borderColor: ACCENT, backgroundColor: 'rgba(0,212,255,0.12)' },
+  modalOptionText: { color: FORM_TEXT, fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 },
+  modalOptionTextActive: { color: ACCENT },
   modalCloseBtn: {
     marginTop: 12,
     borderWidth: 1,
@@ -605,12 +603,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: BG,
   },
-  modalCloseBtnText: {
-    color: FORM_TEXT,
-    fontSize: 10,
-    fontFamily: 'monospace',
-    letterSpacing: 1.2,
-  },
+  modalCloseBtnText: { color: FORM_TEXT, fontSize: 10, fontFamily: 'monospace', letterSpacing: 1.2 },
   uploadBtn: {
     backgroundColor: CARD_BG,
     borderWidth: 1,
@@ -622,12 +615,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 10,
   },
-  uploadBtnText: {
-    color: FORM_TEXT,
-    fontFamily: 'monospace',
-    fontSize: 11,
-    letterSpacing: 1.2,
-  },
+  uploadBtnText: { color: FORM_TEXT, fontFamily: 'monospace', fontSize: 11, letterSpacing: 1.2 },
   uploadMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -635,18 +623,8 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 10,
   },
-  uploadMetaText: {
-    flex: 1,
-    color: PLACEHOLDER,
-    fontSize: 11,
-    fontFamily: 'monospace',
-  },
-  clearUploadText: {
-    color: '#ff6666',
-    fontSize: 10,
-    fontFamily: 'monospace',
-    letterSpacing: 1,
-  },
+  uploadMetaText: { flex: 1, color: PLACEHOLDER, fontSize: 11, fontFamily: 'monospace' },
+  clearUploadText: { color: '#ff6666', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 },
   btn: {
     backgroundColor: ACCENT,
     borderRadius: 8,

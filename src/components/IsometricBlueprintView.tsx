@@ -237,11 +237,42 @@ function stripEmbeddedTexturesFromGlb(source: ArrayBuffer): ArrayBuffer {
   return out;
 }
 
-async function loadTexturelessGlbAsync(assetModule: number): Promise<unknown> {
-  const asset = Asset.fromModule(assetModule);
-  await asset.downloadAsync();
-  const uri = asset.localUri ?? asset.uri;
-  if (!uri) throw new Error('Model asset URI is unavailable');
+type ModelSource = number | string;
+
+/** Max GLB bytes we'll attempt to load — guard against native OOM on Android. */
+const MAX_GLB_BYTES = 20 * 1024 * 1024;
+
+async function assertRemoteSizeOk(uri: string): Promise<void> {
+  if (!uri.startsWith('http')) return;
+  try {
+    const res = await fetch(uri, { method: 'HEAD' });
+    const len = res.headers.get('content-length');
+    if (len) {
+      const bytes = parseInt(len, 10);
+      if (!isNaN(bytes) && bytes > MAX_GLB_BYTES) {
+        const mb = (bytes / 1024 / 1024).toFixed(1);
+        throw new Error(
+          `GLB file is too large (${mb} MB). Compress to under 20 MB before uploading.`,
+        );
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('too large')) throw err;
+  }
+}
+
+async function loadTexturelessGlbAsync(modelSource: ModelSource): Promise<unknown> {
+  let uri: string;
+  if (typeof modelSource === 'string') {
+    await assertRemoteSizeOk(modelSource);
+    uri = modelSource;
+  } else {
+    const asset = Asset.fromModule(modelSource);
+    await asset.downloadAsync();
+    const localUri = asset.localUri ?? asset.uri;
+    if (!localUri) throw new Error('Model asset URI is unavailable');
+    uri = localUri;
+  }
 
   const sourceArrayBuffer = await loadArrayBufferAsync({ uri, onProgress: undefined });
   const texturelessArrayBuffer = stripEmbeddedTexturesFromGlb(sourceArrayBuffer as ArrayBuffer);
@@ -349,6 +380,8 @@ function createBlueprintGrid(options: {
 
 interface Props {
   config: BuildingConfig;
+  /** Optional GLB URL — if provided the blueprint renders this model instead of the bundled default. */
+  modelUri?: string | null;
   active: boolean;
   animKey?: number;
   containerWidth?: number;
@@ -358,6 +391,7 @@ interface Props {
 
 export const IsometricBlueprintView: React.FC<Props> = ({
   config,
+  modelUri,
   active,
   animKey = 0,
   containerWidth = 300,
@@ -603,8 +637,9 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     let modelRoot: THREE.Group;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const modelSource: ModelSource = modelUri?.trim() ? modelUri.trim() : MODEL_ASSET;
       const gltf: any = await withTimeout(
-        loadTexturelessGlbAsync(MODEL_ASSET),
+        loadTexturelessGlbAsync(modelSource),
         MODEL_LOAD_TIMEOUT_MS,
         'Blueprint GLB loading timed out',
       );

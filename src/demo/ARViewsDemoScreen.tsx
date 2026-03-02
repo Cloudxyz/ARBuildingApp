@@ -28,6 +28,7 @@ import {
 } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
 import { IsometricBlueprintView } from '../components/IsometricBlueprintView';
+import { BuildIdlePlaceholder } from '../components/BuildIdlePlaceholder';
 import { Building3DOverlay } from '../ar/Building3DOverlay';
 import MagicCanvasMode, { type MagicBuildPanelState } from '../magic/MagicCanvasMode';
 import { ARModelConfig } from '../types';
@@ -464,6 +465,7 @@ export default function ARViewsDemoScreen() {
                   containerHeight={previewH}
                   onBuildComplete={handleBlueprintBuildComplete}
                 />
+                <BuildIdlePlaceholder visible={!blueprintIsPlaying && !blueprintCompleted} />
               </View>
 
               <View
@@ -483,6 +485,7 @@ export default function ARViewsDemoScreen() {
                   onZoomMetrics={handle3dZoomMetrics}
                   onBuildComplete={handle3dBuildComplete}
                 />
+                <BuildIdlePlaceholder visible={!view3dIsPlaying && !view3dCompleted} />
               </View>
             </View>
           </GestureDetector>

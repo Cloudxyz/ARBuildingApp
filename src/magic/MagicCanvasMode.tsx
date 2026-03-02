@@ -32,7 +32,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import ViewShot from 'react-native-view-shot';
 import { Procedural3DBuilding } from './Procedural3DBuilding';
-import type { Procedural3DDebugMetrics } from './Procedural3DBuilding';
+
 import { NormPoint, BuildingFootprintConfig } from './types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -131,13 +131,16 @@ export default function MagicCanvasMode({
   const [isPlaying,      setIsPlaying]      = useState(false);
   const [animKey,        setAnimKey]        = useState(0);
   const [cameraResetKey, setCameraResetKey] = useState(0);
-  const [debugMetrics, setDebugMetrics] = useState<Procedural3DDebugMetrics | null>(null);
   const [zoomCmdId, setZoomCmdId] = useState(0);
   const [zoomCmdDir, setZoomCmdDir] = useState<'in' | 'out'>('in');
   const [zoomHoldDir, setZoomHoldDir] = useState<-1 | 0 | 1>(0);
   const [zoomUi, setZoomUi] = useState(1.0);
   const [canZoomIn, setCanZoomIn] = useState(true);
   const [canZoomOut, setCanZoomOut] = useState(true);
+  const [manualAzimuthDir,   setManualAzimuthDir]   = useState<-1 | 0 | 1>(0);
+  const [manualElevationDir, setManualElevationDir] = useState<-1 | 0 | 1>(0);
+  const [manualMoveYDir,     setManualMoveYDir]     = useState<-1 | 0 | 1>(0);
+  const [gesturesDisabled,   setGesturesDisabled]   = useState(false);
   const zoomHoldStartedRef = useRef(false);
   const zoomHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playCommandRef = useRef(playCommandId);
@@ -153,9 +156,6 @@ export default function MagicCanvasMode({
   const onContainerLayout = useCallback((e: LayoutChangeEvent) => {
     setCanvasW(e.nativeEvent.layout.width);
     setCanvasH(e.nativeEvent.layout.height);
-  }, []);
-  const handleDebugMetrics = useCallback((metrics: Procedural3DDebugMetrics) => {
-    setDebugMetrics(metrics);
   }, []);
   React.useEffect(() => { buildStateCbRef.current = onBuildStateChange; }, [onBuildStateChange]);
   const handleZoomMetrics = useCallback((metrics: {
@@ -424,7 +424,7 @@ export default function MagicCanvasMode({
         )}
 
         {/* Tap receiver — full canvas area */}
-        
+
         {!closed && (
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -569,29 +569,20 @@ export default function MagicCanvasMode({
             cameraResetKey={cameraResetKey}
             active={active}
             interactionMode="moveModel"
-            onDebugMetrics={handleDebugMetrics}
+            initialZoom={2.3}
+            onBuildComplete={() => setIsPlaying(false)}
             zoomCommandId={zoomCmdId}
             zoomCommandDir={zoomCmdDir}
             zoomHoldDir={zoomHoldDir}
             onZoomMetrics={handleZoomMetrics}
+            manualAzimuthDir={manualAzimuthDir}
+            manualElevationDir={manualElevationDir}
+            manualMoveYDir={manualMoveYDir}
+            gesturesDisabled={gesturesDisabled}
           />
         </View>
       </ViewShot>
 
-      <View style={styles.debugCoordsPanel} pointerEvents="none">
-        <Text style={styles.debugCoordsText}>
-          Pivot X screen: ({(debugMetrics?.modelScreenX ?? 0).toFixed(1)}, {(debugMetrics?.modelScreenY ?? 0).toFixed(1)})
-        </Text>
-        <Text style={styles.debugCoordsText}>
-          Pivot X world: ({(debugMetrics?.modelWorldX ?? 0).toFixed(2)}, {(debugMetrics?.modelWorldY ?? 0).toFixed(2)}, {(debugMetrics?.modelWorldZ ?? 0).toFixed(2)})
-        </Text>
-        <Text style={styles.debugCoordsText}>
-          Building coords: ({(debugMetrics?.buildingCordsX ?? 0).toFixed(2)}, {(debugMetrics?.buildingCordsY ?? 0).toFixed(2)}, {(debugMetrics?.buildingCordsZ ?? 0).toFixed(2)})
-        </Text>
-        <Text style={styles.debugCoordsText}>
-          Building coords screen: ({(debugMetrics?.buildingCordsScreenX ?? 0).toFixed(1)}, {(debugMetrics?.buildingCordsScreenY ?? 0).toFixed(1)})
-        </Text>
-      </View>
 
       {showBuildToolbar && (
         <View style={styles.buildToolbar} pointerEvents="box-none">
@@ -612,6 +603,85 @@ export default function MagicCanvasMode({
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Right-side gesture / camera control rack */}
+      <View style={styles.controlsRack} pointerEvents="box-none">
+        {/* Toggle gesture input */}
+        <TouchableOpacity
+          style={[styles.controlBtn, !gesturesDisabled && styles.controlBtnActive]}
+          onPress={() => setGesturesDisabled(v => !v)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.controlBtnText}>{'\u270B'}</Text>
+        </TouchableOpacity>
+
+        {/* Rotate model left (Y−) */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPressIn={() => setManualAzimuthDir(-1)}
+          onPressOut={() => setManualAzimuthDir(0)}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.controlBtnText, styles.circleLeft]}>{'\u27F3'}</Text>
+        </TouchableOpacity>
+
+        {/* Rotate model right (Y+) */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPressIn={() => setManualAzimuthDir(1)}
+          onPressOut={() => setManualAzimuthDir(0)}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.controlBtnText, styles.circleRight]}>{'\u27F3'}</Text>
+        </TouchableOpacity>
+
+        {/* Tilt model up (X−) */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPressIn={() => setManualElevationDir(1)}
+          onPressOut={() => setManualElevationDir(0)}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.controlBtnText, styles.circleUp]}>{'\u27F3'}</Text>
+        </TouchableOpacity>
+
+        {/* Tilt model down (X+) */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPressIn={() => setManualElevationDir(-1)}
+          onPressOut={() => setManualElevationDir(0)}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.controlBtnText, styles.circleDown]}>{'\u27F3'}</Text>
+        </TouchableOpacity>
+        {/* Move model / camera target UP */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPressIn={() => setManualMoveYDir(-1)}
+          onPressOut={() => setManualMoveYDir(0)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.controlBtnText}>{'↑'}</Text>
+        </TouchableOpacity>
+
+        {/* Move model / camera target DOWN */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPressIn={() => setManualMoveYDir(1)}
+          onPressOut={() => setManualMoveYDir(0)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.controlBtnText}>{'↓'}</Text>
+        </TouchableOpacity>
+        {/* Reset camera / model pose */}
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPress={() => setCameraResetKey(k => k + 1)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.controlBtnText}>{'\u27F3'}</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -655,11 +725,11 @@ const styles = StyleSheet.create({
 
   // ── Toolbar (shared) ──────────────────────────────────────────────────────
   toolbar: {
-    position: 'absolute', top: 8, right: 8,
+    position: 'absolute', top: 8, left: 8,
     flexDirection: 'column', gap: 6, alignItems: 'center',
   },
   buildToolbar: {
-    position: 'absolute', top: 8, right: 8,
+    position: 'absolute', top: 8, left: 8,
     flexDirection: 'column', gap: 6, alignItems: 'center',
   },
   toolBtn: {
@@ -690,24 +760,7 @@ const styles = StyleSheet.create({
   // ── Floor label ───────────────────────────────────────────────────────────
   floorLabel:     { width: 38, height: 24, alignItems: 'center', justifyContent: 'center' },
   floorLabelText: { color: ACCENT, fontSize: 12, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
-  debugCoordsPanel: {
-    position: 'absolute',
-    left: 8,
-    bottom: 8,
-    backgroundColor: 'rgba(0,0,0,0.62)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 2,
-    maxWidth: '82%',
-  },
-  debugCoordsText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
-  },
+
   imageGuideBox: {
     position: 'absolute',
     borderWidth: 1.5,
@@ -738,6 +791,48 @@ const styles = StyleSheet.create({
     color: '#dff7ff',
     fontSize: 10,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+
+  // ── Right-side camera / gesture control rack ──────────────────────────────
+  controlsRack: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'column',
+    gap: 6,
+    alignItems: 'center',
+  },
+  controlBtn: {
+    width: 46,
+    height: 42,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  controlBtnActive: {
+    borderColor: ACCENT,
+    backgroundColor: 'rgba(0,212,255,0.18)',
+  },
+  controlBtnText: {
+    color: '#ffffff',
+    fontSize: 22,
+    lineHeight: 24,
+    fontWeight: '700' as const,
+  },
+  circleLeft: {
+    transform: [{ rotate: '180deg' }],
+  },
+  circleRight: {
+    transform: [{ rotate: '0deg' }],
+  },
+  circleUp: {
+    transform: [{ rotate: '-90deg' }],
+  },
+  circleDown: {
+    transform: [{ rotate: '90deg' }],
   },
 });
 
