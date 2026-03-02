@@ -225,15 +225,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.quickActionsRow}>
-          <TouchableOpacity
-            style={styles.quickActionBtn}
-            onPress={() => router.push('/(app)/unit/type-models')}
-          >
-            <Text style={styles.quickActionBtnText}>UNIT TYPE MODELS</Text>
-          </TouchableOpacity>
-        </View>
-
         {currentError ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{currentError}</Text>
@@ -352,25 +343,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: CARD_BG,
-  },
-  quickActionsRow: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  quickActionBtn: {
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 8,
-    backgroundColor: CARD_BG,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  quickActionBtnText: {
-    color: ACCENT,
-    fontSize: 10,
-    fontFamily: 'monospace',
-    letterSpacing: 1.4,
-    fontWeight: '700',
   },
   tabBtn: {
     flex: 1,
