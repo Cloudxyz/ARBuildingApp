@@ -33,7 +33,8 @@ import {
   LayoutChangeEvent,
   useWindowDimensions,
 } from 'react-native';
-import { useLocalSearchParams, Stack, useIsFocused } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import {
   GestureHandlerRootView,
   GestureDetector,

@@ -33,7 +33,7 @@ import { Building3DOverlay } from '../ar/Building3DOverlay';
 import MagicCanvasMode, { type MagicBuildPanelState } from '../magic/MagicCanvasMode';
 import { ARModelConfig } from '../types';
 import { DEFAULT_AR_CONFIG } from '../ar/useARBuildingModel';
-import { useIsFocused } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 type DemoViewMode = 'blueprint' | '3d' | 'magic3d';
 
