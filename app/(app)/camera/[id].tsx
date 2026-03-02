@@ -79,7 +79,7 @@ export default function UnitARPreviewScreen() {
   const unit = units.find((u) => u.id === id);
 
   // Per-unit, per-type GLB models (Phase 1 data)
-  const { byType } = useUnitGlbModels(id ?? '');
+  const { byType, loading: glbLoading } = useUnitGlbModels(id ?? '');
 
   const [landPreviewType, setLandPreviewType] =
     useState<Exclude<UnitType, 'land'>>('house');
@@ -489,9 +489,9 @@ export default function UnitARPreviewScreen() {
                   style={[StyleSheet.absoluteFill, viewMode !== 'blueprint' && styles.hiddenLayer]}
                   pointerEvents={viewMode === 'blueprint' ? 'auto' : 'none'}
                 >
-                  {isFocused && (
+                  {isFocused && !glbLoading && (
                     <IsometricBlueprintView
-                      key={`unit-bp-${id}-${config.floorCount}-${config.footprintW}-${config.footprintH}-${resolvedModelUri ?? 'default'}`}
+                      key={`unit-bp-${id}-${landPreviewType}-${config.floorCount}-${config.footprintW}-${config.footprintH}`}
                       config={{
                         floorCount:   config.floorCount,
                         scale:        config.scale,
@@ -517,9 +517,9 @@ export default function UnitARPreviewScreen() {
                   style={[StyleSheet.absoluteFill, viewMode !== '3d' && styles.hiddenLayer]}
                   pointerEvents={viewMode === '3d' ? 'auto' : 'none'}
                 >
-                  {isFocused && (
+                  {isFocused && !glbLoading && (
                     <Building3DOverlay
-                      key={`unit-3d-${id}-${unit?.unit_type ?? 'na'}-${landPreviewType}-${resolvedModelUri ?? 'default'}`}
+                      key={`unit-3d-${id}-${unit?.unit_type ?? 'na'}-${landPreviewType}`}
                       config={config}
                       isPlaying={view3dIsPlaying}
                       animKey={view3dAnimKey}

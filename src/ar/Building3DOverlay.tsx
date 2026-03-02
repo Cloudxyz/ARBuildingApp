@@ -912,6 +912,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
       }
     };
 
+    if (contextSessionRef.current !== sessionId) return;
     if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
     if (__DEV__) console.log(`[Building3DOverlay] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
     raffRef.current = requestAnimationFrame(animate);

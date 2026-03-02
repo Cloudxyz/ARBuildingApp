@@ -736,6 +736,7 @@ export const IsometricBlueprintView: React.FC<Props> = ({
       }
     };
 
+    if (contextSessionRef.current !== sessionId) return;
     if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
     if (__DEV__) console.log(`[IsometricBlueprintView] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
     raffRef.current = requestAnimationFrame(animate);
