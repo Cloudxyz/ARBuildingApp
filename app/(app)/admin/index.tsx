@@ -25,6 +25,7 @@ import {
 import { Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRoleContext, AppRole } from '../../../src/lib/RoleContext';
+import { useAuth } from '../../../src/hooks/useAuth';
 import { supabase } from '../../../src/lib/supabase';
 import { Development, Unit } from '../../../src/types';
 
@@ -60,10 +61,12 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
 
 function UserCard({
   user,
+  isSelf,
   onToggleRole,
   onDelete,
 }: {
   user: UserRow;
+  isSelf: boolean;
   onToggleRole: () => void;
   onDelete: () => void;
 }) {
@@ -72,7 +75,7 @@ function UserCard({
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardName} numberOfLines={1}>
-          {user.full_name ?? '(no name)'}
+          {user.full_name ?? '(no name)'}{isSelf ? ' (you)' : ''}
         </Text>
         <View style={[styles.rolePill, isAdmin && styles.rolePillAdmin]}>
           <Text style={[styles.rolePillText, isAdmin && styles.rolePillTextAdmin]}>
@@ -82,12 +85,20 @@ function UserCard({
       </View>
       <Text style={styles.cardSub} numberOfLines={1}>{user.email}</Text>
       <View style={styles.cardFooter}>
-        <TouchableOpacity style={styles.actionBtn} onPress={onToggleRole}>
+        <TouchableOpacity
+          style={[styles.actionBtn, isSelf && styles.actionBtnDisabled]}
+          onPress={isSelf ? undefined : onToggleRole}
+          disabled={isSelf}
+        >
           <Text style={styles.actionBtnText}>
             {isAdmin ? 'DEMOTE → USER' : 'PROMOTE → MASTER'}
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDanger]} onPress={onDelete}>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.actionBtnDanger, isSelf && styles.actionBtnDisabled]}
+          onPress={isSelf ? undefined : onDelete}
+          disabled={isSelf}
+        >
           <Text style={styles.actionBtnText}>DELETE</Text>
         </TouchableOpacity>
       </View>
@@ -146,6 +157,7 @@ function UnitCard({ unit, onDelete }: { unit: Unit & { ownerEmail?: string }; on
 // ─── main screen ──────────────────────────────────────────────────────────────
 export default function AdminScreen() {
   const { isMaster } = useRoleContext();
+  const { user: currentUser } = useAuth();
   const insets = useSafeAreaInsets();
   const safeBottom = insets.bottom + 24;
 
@@ -374,6 +386,7 @@ export default function AdminScreen() {
             renderItem={({ item }) => (
               <UserCard
                 user={item}
+                isSelf={item.id === currentUser?.id}
                 onToggleRole={() => handleToggleRole(item)}
                 onDelete={() => handleDeleteUser(item)}
               />
@@ -466,5 +479,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   actionBtnDanger: { borderColor: '#ff2f4530', backgroundColor: 'rgba(255,47,69,0.08)' },
+  actionBtnDisabled: { opacity: 0.3 },
   actionBtnText:   { color: '#aaaacc', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1, fontWeight: '700' },
 });
