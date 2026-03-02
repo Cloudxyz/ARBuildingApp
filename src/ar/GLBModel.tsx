@@ -156,6 +156,7 @@ export const GLBModel: React.FC<GLBModelProps> = ({
   const isPlayingRef = useRef(isPlaying);
   const raffRef      = useRef<number>(0);
   const contextSessionRef = useRef(0);
+  const rafActiveRef = useRef(false);
   const rendererRef  = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef     = useRef<THREE.Scene | null>(null);
 
@@ -171,8 +172,6 @@ export const GLBModel: React.FC<GLBModelProps> = ({
       const sessionId = contextSessionRef.current + 1;
       contextSessionRef.current = sessionId;
       cancelAnimationFrame(raffRef.current);
-      rafLoopStats.active += 1;
-      if (__DEV__) console.log(`[GLBModel] GL session #${sessionId} start, activeRAF=${rafLoopStats.active}`);
 
       try {
         const renderer = new Renderer({ gl, width, height, pixelRatio: 1, alpha: true });
@@ -214,6 +213,8 @@ export const GLBModel: React.FC<GLBModelProps> = ({
           renderer.render(scene, camera);
           gl.endFrameEXP();
         };
+        if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
+        if (__DEV__) console.log(`[GLBModel] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
         raffRef.current = requestAnimationFrame(animate);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -229,7 +230,7 @@ export const GLBModel: React.FC<GLBModelProps> = ({
     cancelAnimationFrame(raffRef.current);
     if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
     if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
-    rafLoopStats.active -= 1;
+    if (rafActiveRef.current) { rafActiveRef.current = false; rafLoopStats.active -= 1; }
     if (__DEV__) logGlbStats();
   }, []);
 

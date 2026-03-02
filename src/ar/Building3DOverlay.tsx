@@ -249,6 +249,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
   const rendererRef  = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef     = useRef<THREE.Scene | null>(null);
   const contextSessionRef = useRef(0);
+  const rafActiveRef = useRef(false);
 
   const azimuthRef      = useRef(DEFAULT_AZIMUTH);
   const elevationRef    = useRef(DEFAULT_ELEVATION);
@@ -455,8 +456,6 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
     const sessionId = contextSessionRef.current + 1;
     contextSessionRef.current = sessionId;
     cancelAnimationFrame(raffRef.current);
-    rafLoopStats.active += 1;
-    if (__DEV__) console.log(`[Building3DOverlay] GL session #${sessionId} start, activeRAF=${rafLoopStats.active}`);
     setErrorMsg('');
     setLoadState('loading');
 
@@ -913,6 +912,8 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
       }
     };
 
+    if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
+    if (__DEV__) console.log(`[Building3DOverlay] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
     raffRef.current = requestAnimationFrame(animate);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -929,7 +930,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
     cancelAnimationFrame(raffRef.current);
     if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
     if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
-    rafLoopStats.active -= 1;
+    if (rafActiveRef.current) { rafActiveRef.current = false; rafLoopStats.active -= 1; }
     if (__DEV__) logGlbStats();
   }, []);
 

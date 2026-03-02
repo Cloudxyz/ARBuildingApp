@@ -274,34 +274,66 @@ export function clearGlbCache(): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * In-flight deduplication map: URI → Promise<stripped ArrayBuffer>.
+ *
+ * When Building3DOverlay and IsometricBlueprintView both mount at the same
+ * time and call loadTexturelessGlb for the same URI, the second call arrives
+ * while the first download is still in progress.  Without this map they both
+ * see a cache miss and issue two independent HTTP requests for the same file.
+ * With this map the second call receives the same Promise and both callers
+ * share a single download.
+ */
+const glbInflight = new Map<string, Promise<ArrayBuffer>>();
+
+/**
  * Full pipeline: resolve URI → size-check → download → strip textures → cache
  * → parse GLTF.
  *
  * The stripped `ArrayBuffer` is cached by URI so subsequent calls for the same
- * model are instant (parse only, no network round-trip).
+ * model are instant (parse only, no network round-trip).  Concurrent calls for
+ * the same URI share a single in-flight download (deduplication).
  *
  * Returns the parsed GLTF object (same shape as `GLTFLoader.parse` resolve).
  */
 export async function loadTexturelessGlb(source: GlbSource): Promise<unknown> {
   const uri = await resolveGlbUri(source);
 
-  // Check cache first
-  let stripped = lruGet(uri);
-
-  if (!stripped) {
-    glbCacheStats.misses++;
-    if (__DEV__) console.log(`[glbLoader] cache MISS key=${uri.slice(-40)} — downloading`);
-    // Size guard before committing to a large download
-    await assertRemoteSizeOk(uri);
-    const raw = await loadArrayBufferAsync({ uri, onProgress: undefined });
-    stripped = stripEmbeddedTexturesFromGlb(raw as ArrayBuffer);
-    lruSet(uri, stripped);
+  // ── 1. LRU cache hit (instant, no network) ──────────────────────────────
+  const cached = lruGet(uri);
+  if (cached) {
+    const loader = new GLTFLoader();
+    return await new Promise((resolve, reject) => { loader.parse(cached, '', resolve, reject); });
   }
 
-  const loader = new GLTFLoader();
-  return await new Promise((resolve, reject) => {
-    loader.parse(stripped!, '', resolve, reject);
+  // ── 2. In-flight dedup — share an existing download Promise ─────────────
+  const inflight = glbInflight.get(uri);
+  if (inflight) {
+    glbCacheStats.hits++;
+    if (__DEV__) console.log(`[glbLoader] in-flight HIT key=${uri.slice(-40)}`);
+    const stripped = await inflight;
+    const loader = new GLTFLoader();
+    return await new Promise((resolve, reject) => { loader.parse(stripped, '', resolve, reject); });
+  }
+
+  // ── 3. Cache miss — start a new download ────────────────────────────────
+  glbCacheStats.misses++;
+  if (__DEV__) console.log(`[glbLoader] cache MISS key=${uri.slice(-40)} — downloading`);
+
+  const downloadPromise: Promise<ArrayBuffer> = (async () => {
+    await assertRemoteSizeOk(uri);
+    const raw = await loadArrayBufferAsync({ uri, onProgress: undefined });
+    const stripped = stripEmbeddedTexturesFromGlb(raw as ArrayBuffer);
+    lruSet(uri, stripped);
+    return stripped;
+  })().finally(() => {
+    glbInflight.delete(uri);
   });
+
+  glbInflight.set(uri, downloadPromise);
+
+  const stripped = await downloadPromise;
+  const loader = new GLTFLoader();
+  return await new Promise((resolve, reject) => { loader.parse(stripped, '', resolve, reject); });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

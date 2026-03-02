@@ -254,6 +254,7 @@ export const IsometricBlueprintView: React.FC<Props> = ({
   const onBuildCompleteRef = useRef<Props['onBuildComplete']>(onBuildComplete);
   const completionSentRef = useRef(false);
   const contextSessionRef = useRef(0);
+  const rafActiveRef = useRef(false);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -420,8 +421,6 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     const sessionId = contextSessionRef.current + 1;
     contextSessionRef.current = sessionId;
     cancelAnimationFrame(raffRef.current);
-    rafLoopStats.active += 1;
-    if (__DEV__) console.log(`[IsometricBlueprintView] GL session #${sessionId} start, activeRAF=${rafLoopStats.active}`);
     setIsGlReady(false);
 
     const bufW = gl.drawingBufferWidth;
@@ -737,6 +736,8 @@ export const IsometricBlueprintView: React.FC<Props> = ({
       }
     };
 
+    if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
+    if (__DEV__) console.log(`[IsometricBlueprintView] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
     raffRef.current = requestAnimationFrame(animate);
   }, [config.floorCount, config.footprintW, config.footprintH, resetCamera]);
 
@@ -745,7 +746,7 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     cancelAnimationFrame(raffRef.current);
     if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
     if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
-    rafLoopStats.active -= 1;
+    if (rafActiveRef.current) { rafActiveRef.current = false; rafLoopStats.active -= 1; }
     if (__DEV__) logGlbStats();
   }, []);
 
