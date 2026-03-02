@@ -655,6 +655,11 @@ export const IsometricBlueprintView: React.FC<Props> = ({
         buildTRef.current = Math.min(1, buildTRef.current + dt / dur);
       }
 
+      // Auto-rotate camera during build (matches Building3DOverlay behaviour)
+      if (isActiveRef.current && buildTRef.current < 1 && manualControlRef.current.azimuthDir === 0) {
+        azimuthRef.current += 0.95 * dt;
+      }
+
       const t = buildTRef.current;
       if (isActiveRef.current && t >= 1 && !completionSentRef.current) {
         completionSentRef.current = true;
@@ -738,7 +743,6 @@ export const IsometricBlueprintView: React.FC<Props> = ({
 
     if (contextSessionRef.current !== sessionId) return;
     if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
-    if (__DEV__) console.log(`[IsometricBlueprintView] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
     raffRef.current = requestAnimationFrame(animate);
   }, [config.floorCount, config.footprintW, config.footprintH, resetCamera]);
 
@@ -748,7 +752,6 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
     if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
     if (rafActiveRef.current) { rafActiveRef.current = false; rafLoopStats.active -= 1; }
-    if (__DEV__) logGlbStats();
   }, []);
 
   return (
@@ -846,13 +849,15 @@ export const IsometricBlueprintView: React.FC<Props> = ({
           >
             <Text style={styles.controlBtnText}>{'\u2193'}</Text>
           </TouchableOpacity>
-        </View>
-      )}
 
-      {isGlReady && active && (
-        <TouchableOpacity style={styles.resetBtn} onPress={resetCamera} activeOpacity={0.7}>
-          <Text style={styles.resetBtnText}>{'\u27F3'}</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.controlBtn}
+            onPress={resetCamera}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.controlBtnText}>{'⟳'}</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -870,8 +875,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   controlBtn: {
-    width: 46,
-    height: 42,
+    width: 38,
+    height: 38,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
@@ -885,8 +890,8 @@ const styles = StyleSheet.create({
   },
   controlBtnText: {
     color: '#ffffff',
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '700',
   },
   circleLeft: {
@@ -900,25 +905,6 @@ const styles = StyleSheet.create({
   },
   circleDown: {
     transform: [{ rotate: '90deg' }],
-  },
-  resetBtn: {
-    position: 'absolute',
-    bottom: 16,
-    right: 16,
-    width: 46,
-    height: 42,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resetBtnText: {
-    color: '#ffffff',
-    fontSize: 22,
-    lineHeight: 24,
-    fontWeight: '700',
   },
 });
 

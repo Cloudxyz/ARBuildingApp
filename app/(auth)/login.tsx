@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   brandSub: {
-    color: '#555577',
+    color: 'rgba(255,255,255,0.55)',
     fontSize: 14,
   },
   form: {
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
   },
   switchText: {
-    color: '#555577',
+    color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
     fontSize: 14,
   },

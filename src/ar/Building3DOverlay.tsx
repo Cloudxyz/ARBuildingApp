@@ -71,6 +71,7 @@ interface Building3DOverlayProps {
   isPlaying: boolean;
   animKey: number;
   modelUri?: string | null;
+  constrainToFootprint?: boolean;
   active?: boolean;
   width: number;
   height: number;
@@ -224,6 +225,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
   isPlaying,
   animKey,
   modelUri,
+  constrainToFootprint = false,
   active = true,
   zoomCommandId = 0,
   zoomCommandDir = 'in',
@@ -262,6 +264,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
   const pinchDistRef    = useRef(0);          // previous distance between 2 fingers
   const lastMidRef      = useRef({ x: 0, y: 0 }); // previous midpoint of 2 fingers
   const layoutSizeRef   = useRef({ width: 0, height: 0 });
+  const forceResizeRef  = useRef(false); // set true on focus-return to force viewport refresh
   const metricsTimeRef  = useRef(0);
   const lastZoomReportRef = useRef({
     zoomValue: NaN,
@@ -269,6 +272,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
     canZoomOut: true,
   });
   const gesturesEnabledRef = useRef(true);
+  const constrainToFootprintRef = useRef(constrainToFootprint);
   const zoomCommandIdRef = useRef(zoomCommandId);
   const zoomCommandDirRef = useRef<'in' | 'out'>(zoomCommandDir);
   const zoomHoldDirRef = useRef<-1 | 0 | 1>(zoomHoldDir);
@@ -287,6 +291,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { isActiveRef.current  = active;    }, [active]);
   useEffect(() => { configRef.current    = config;    }, [config]);
+  useEffect(() => { constrainToFootprintRef.current = constrainToFootprint; }, [constrainToFootprint]);
   useEffect(() => { gesturesEnabledRef.current = gesturesEnabled; }, [gesturesEnabled]);
   useEffect(() => { zoomCommandIdRef.current = zoomCommandId; }, [zoomCommandId]);
   useEffect(() => { zoomCommandDirRef.current = zoomCommandDir; }, [zoomCommandDir]);
@@ -303,6 +308,7 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
   useEffect(() => {
     if (active) {
       warmupPendingRef.current = true;
+      forceResizeRef.current   = true; // re-apply viewport after tab-focus-return
       setIsWarmingUp(true);
     } else {
       warmupPendingRef.current = false;
@@ -615,6 +621,19 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
       return;
     }
 
+    // -- Constrain model to polygon footprint (3D Magic “model” mode) --------
+    if (constrainToFootprintRef.current) {
+      const { footprintW, footprintH } = configRef.current;
+      if (footprintW > 0 && footprintH > 0) {
+        const rawSize = box.getSize(new THREE.Vector3());
+        if (rawSize.x > 0 && rawSize.z > 0) {
+          const s = Math.min(footprintW / rawSize.x, footprintH / rawSize.z);
+          modelRoot.scale.setScalar(s);
+          box.setFromObject(modelRoot); // recompute AABB after scaling
+        }
+      }
+    }
+
     const center = box.getCenter(new THREE.Vector3());
     const size   = box.getSize(new THREE.Vector3());
     modelRoot.position.sub(center);
@@ -795,19 +814,22 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
       if (curBufW <= 0 || curBufH <= 0) return;
       const viewW = layoutSizeRef.current.width > 0 ? layoutSizeRef.current.width : curBufW;
       const viewH = layoutSizeRef.current.height > 0 ? layoutSizeRef.current.height : curBufH;
-      if (curBufW !== lastBufW || curBufH !== lastBufH) {
+      if (curBufW !== lastBufW || curBufH !== lastBufH || forceResizeRef.current) {
+        forceResizeRef.current = false;
         lastBufW = curBufW; lastBufH = curBufH;
         renderer.setSize(curBufW, curBufH, false);
         renderer.setViewport(0, 0, curBufW, curBufH);
         if (cameraRef.current) {
-          cameraRef.current.aspect = viewW / Math.max(1, viewH);
+          // Use buffer ratio — same aspect as layout, but never stale after tab-switch
+          cameraRef.current.aspect = curBufW / Math.max(1, curBufH);
           cameraRef.current.updateProjectionMatrix();
         }
       }
 
       // Orbit camera
       if (cameraRef.current && distRef.current > 0) {
-        const targetAspect = viewW / Math.max(1, viewH);
+        // Always derive aspect from buffer dimensions to avoid stale layoutSizeRef
+        const targetAspect = curBufW / Math.max(1, curBufH);
         if (Math.abs(cameraRef.current.aspect - targetAspect) > 0.0001) {
           cameraRef.current.aspect = targetAspect;
           cameraRef.current.updateProjectionMatrix();
@@ -914,7 +936,6 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
 
     if (contextSessionRef.current !== sessionId) return;
     if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
-    if (__DEV__) console.log(`[Building3DOverlay] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
     raffRef.current = requestAnimationFrame(animate);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -932,7 +953,6 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
     if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
     if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
     if (rafActiveRef.current) { rafActiveRef.current = false; rafLoopStats.active -= 1; }
-    if (__DEV__) logGlbStats();
   }, []);
 
   return (
@@ -1045,17 +1065,15 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
           >
             <Text style={styles.controlBtnText}>{'\u2193'}</Text>
           </TouchableOpacity>
-        </View>
-      )}
 
-      {loadState === 'ready' && (
-        <TouchableOpacity
-          style={styles.resetBtn}
-          onPress={resetCamera}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.resetBtnText}>{'\u27F3'}</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.controlBtn}
+            onPress={resetCamera}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.controlBtnText}>{'\u27F3'}</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -1113,8 +1131,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   controlBtn: {
-    width: 46,
-    height: 42,
+    width: 38,
+    height: 38,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
@@ -1128,8 +1146,8 @@ const styles = StyleSheet.create({
   },
   controlBtnText: {
     color: '#ffffff',
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '700',
   },
   circleLeft: {
@@ -1143,25 +1161,6 @@ const styles = StyleSheet.create({
   },
   circleDown: {
     transform: [{ rotate: '90deg' }],
-  },
-  resetBtn: {
-    position:        'absolute',
-    bottom:          16,
-    right:           16,
-    width:           46,
-    height:          42,
-    borderRadius:    8,
-    borderWidth:     1,
-    borderColor:     'rgba(255,255,255,0.35)',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems:      'center',
-    justifyContent:  'center',
-  },
-  resetBtnText: {
-    color:      '#ffffff',
-    fontSize:   22,
-    lineHeight: 24,
-    fontWeight: '700',
   },
 });
 

@@ -346,10 +346,10 @@ const styles = StyleSheet.create({
     color: '#ffe044',
   },
   cardStatusEmpty: {
-    color: '#9999aa',
+    color: 'rgba(255,255,255,0.4)',
   },
   urlLabel: {
-    color: '#7f89aa',
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 10,
     fontFamily: 'monospace',
     letterSpacing: 1.2,

@@ -138,6 +138,8 @@ export interface ParticleConfig {
   size: number;
   duration: number;
   delay: number;
+  /** 0-1: where in the animation cycle this particle starts (eliminates initial-line artefact) */
+  phase: number;
 }
 
 // =============================================

@@ -27,6 +27,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  ScrollView,
   ActivityIndicator,
   Platform,
   LayoutChangeEvent,
@@ -40,7 +41,13 @@ import {
   GestureDetector,
   Gesture,
 } from 'react-native-gesture-handler';
-import { useSharedValue } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useUnitGlbModels, useUnits } from '../../../src/hooks/useUnits';
@@ -162,7 +169,28 @@ export default function UnitARPreviewScreen() {
   const [magicBuildState,    setMagicBuildState]    = useState<MagicBuildPanelState>({
     phase: 'pick', isPlaying: false, floorCount: 5,
     zoomValue: 1, canZoomIn: true, canZoomOut: true,
+    magicMode: 'generate', selectedModelType: 'house', resolvedModelUrl: null,
   });
+  const [magicMode, setMagicMode] = useState<'generate' | 'model'>('generate');
+  const [magicSelectedType, setMagicSelectedType] = useState<'house' | 'building' | 'commercial'>('house');
+  const [showScrollHint, setShowScrollHint] = useState(false);
+  const footerContentH = useRef(0);
+  const footerContainerH = useRef(0);
+  const footerScrollY = useRef(0);
+  const scrollBounceY = useSharedValue(0);
+  const animatedArrowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: scrollBounceY.value }],
+  }));
+  useEffect(() => {
+    scrollBounceY.value = withRepeat(
+      withSequence(
+        withTiming(5, { duration: 380 }),
+        withTiming(0, { duration: 380 }),
+      ),
+      -1,
+      false,
+    );
+  }, [scrollBounceY]);
   const magicZoomHoldTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const magicZoomHoldStartedRef = useRef(false);
 
@@ -474,6 +502,10 @@ export default function UnitARPreviewScreen() {
               externalZoomCommandDir={magicZoomCmdDir}
               externalZoomHoldDir={magicZoomHoldDir}
               onBuildStateChange={handleMagicBuildState}
+              magicMode={magicMode}
+              selectedModelType={magicSelectedType}
+              onMagicModeChange={setMagicMode}
+              onModelTypeChange={setMagicSelectedType}
             />
           </View>
 
@@ -557,7 +589,31 @@ export default function UnitARPreviewScreen() {
         </View>
 
         {/* Controls panel */}
-        <View style={[styles.panel, { paddingBottom: panelBottomPadding }]}>
+        <View style={{ flex: 1, maxHeight: isMagicMode ? Math.round(height * 0.38) : undefined }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: panelBottomPadding }}
+          scrollEventThrottle={16}
+          onScroll={({ nativeEvent }) => {
+            footerScrollY.current = nativeEvent.contentOffset.y;
+            setShowScrollHint(
+              footerScrollY.current + footerContainerH.current < footerContentH.current - 8,
+            );
+          }}
+          onContentSizeChange={(_w, h) => {
+            footerContentH.current = h;
+            setShowScrollHint(
+              footerScrollY.current + footerContainerH.current < h - 8,
+            );
+          }}
+          onLayout={({ nativeEvent: { layout } }) => {
+            footerContainerH.current = layout.height;
+            setShowScrollHint(
+              footerScrollY.current + layout.height < footerContentH.current - 8,
+            );
+          }}
+        >
 
           {/* Play / Stop + Save */}
           <View style={styles.row}>
@@ -621,6 +677,44 @@ export default function UnitARPreviewScreen() {
             </ControlRow>
           )}
 
+          {/* MODE selector — 3D Magic build3d only */}
+          {isMagicMode && magicBuildState.phase === 'build3d' && (
+            <ControlRow label="MODE">
+              <View style={styles.chipRow}>
+                {(['generate', 'model'] as const).map((m) => (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.typeChip, magicMode === m && styles.typeChipActive]}
+                    onPress={() => setMagicMode(m)}
+                  >
+                    <Text style={[styles.typeChipText, magicMode === m && { color: ACCENT }]}>
+                      {m === 'generate' ? 'GENERATE' : 'MODEL'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ControlRow>
+          )}
+
+          {/* TYPE selector — magic model mode only */}
+          {isMagicMode && magicBuildState.phase === 'build3d' && magicMode === 'model' && (
+            <ControlRow label="TYPE">
+              <View style={styles.chipRow}>
+                {(['house', 'building', 'commercial'] as const).map((t) => (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.typeChip, magicSelectedType === t && styles.typeChipActive]}
+                    onPress={() => setMagicSelectedType(t)}
+                  >
+                    <Text style={[styles.typeChipText, magicSelectedType === t && { color: ACCENT }]}>
+                      {t.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ControlRow>
+          )}
+
           {/* Floors */}
           <ControlRow label="FLOORS">
             <Stepper
@@ -664,6 +758,12 @@ export default function UnitARPreviewScreen() {
                 : 'Generate 3D in Magic to unlock Play / Floors / Zoom')
               : 'Pinch / Rotate / Drag active on preview'}
           </Text>
+        </ScrollView>
+        {showScrollHint && (
+          <Animated.View style={[styles.scrollHintArrow, animatedArrowStyle]} pointerEvents="none">
+            <Text style={styles.scrollHintText}>{'▾'}</Text>
+          </Animated.View>
+        )}
         </View>
 
       </GestureHandlerRootView>
@@ -737,7 +837,7 @@ const styles = StyleSheet.create({
   pillBtnActive:      { backgroundColor: ACCENT },
   pillBtnMagicActive: { backgroundColor: GREEN },
   pillBtnText: {
-    color: '#444466', fontSize: 10,
+    color: 'rgba(255,255,255,0.6)', fontSize: 10,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     fontWeight: '700',
   },
@@ -756,12 +856,23 @@ const styles = StyleSheet.create({
     borderRadius: 4, marginTop: 4, marginBottom: 2,
   },
   labelText: {
-    color: '#333366', fontSize: 9,
+    color: 'rgba(255,255,255,0.5)', fontSize: 9,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     letterSpacing: 2,
   },
 
   panel: { flex: 1, padding: 16, gap: 12 },
+  scrollHintArrow: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    backgroundColor: 'rgba(20,20,60,0.72)',
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+    zIndex: 10,
+  },
+  scrollHintText: { color: '#fff', fontSize: 20, lineHeight: 24 },
   row:   { flexDirection: 'row', gap: 10 },
 
   playBtn: {
@@ -791,7 +902,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 10,
   },
   label: {
-    color: '#444466', fontSize: 9,
+    color: 'rgba(255,255,255,0.55)', fontSize: 9,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     letterSpacing: 2,
   },
@@ -815,13 +926,13 @@ const styles = StyleSheet.create({
   },
   typeChipActive: { borderColor: ACCENT, backgroundColor: 'rgba(0,212,255,0.08)' },
   typeChipText: {
-    color: '#555577', fontSize: 10,
+    color: 'rgba(255,255,255,0.65)', fontSize: 10,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     letterSpacing: 1,
   },
 
   hint: {
-    color: '#333355', fontSize: 10,
+    color: 'rgba(255,255,255,0.45)', fontSize: 10,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     textAlign: 'center', paddingTop: 4,
   },

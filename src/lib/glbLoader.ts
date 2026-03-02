@@ -226,13 +226,7 @@ export const rafLoopStats = { active: 0 };
 
 /** Print a summary of cache + loop health to the Metro console (DEV only). */
 export function logGlbStats(): void {
-  if (!__DEV__) return;
-  const total = glbCacheStats.hits + glbCacheStats.misses;
-  const ratio = total > 0 ? ((glbCacheStats.hits / total) * 100).toFixed(0) : 'n/a';
-  console.log(
-    `[glbLoader] cache hits=${glbCacheStats.hits} misses=${glbCacheStats.misses} ratio=${ratio}%` +
-    ` | activeRAFLoops=${rafLoopStats.active} | cachedUris=${glbCache.size}`,
-  );
+  // logging removed
 }
 
 function lruGet(key: string): ArrayBuffer | undefined {
@@ -242,7 +236,6 @@ function lruGet(key: string): ArrayBuffer | undefined {
     glbCache.delete(key);
     glbCache.set(key, value);
     glbCacheStats.hits++;
-    if (__DEV__) console.log(`[glbLoader] cache HIT  key=${key.slice(-40)}`);
   }
   return value;
 }
@@ -309,7 +302,6 @@ export async function loadTexturelessGlb(source: GlbSource): Promise<unknown> {
   const inflight = glbInflight.get(uri);
   if (inflight) {
     glbCacheStats.hits++;
-    if (__DEV__) console.log(`[glbLoader] in-flight HIT key=${uri.slice(-40)}`);
     const stripped = await inflight;
     const loader = new GLTFLoader();
     return await new Promise((resolve, reject) => { loader.parse(stripped, '', resolve, reject); });
@@ -317,7 +309,6 @@ export async function loadTexturelessGlb(source: GlbSource): Promise<unknown> {
 
   // ── 3. Cache miss — start a new download ────────────────────────────────
   glbCacheStats.misses++;
-  if (__DEV__) console.log(`[glbLoader] cache MISS key=${uri.slice(-40)} — downloading`);
 
   const downloadPromise: Promise<ArrayBuffer> = (async () => {
     await assertRemoteSizeOk(uri);
@@ -345,7 +336,6 @@ export async function loadTexturelessGlb(source: GlbSource): Promise<unknown> {
  * subgraph. Call before removing a model from the scene on unmount.
  */
 export function disposeObject3D(root: THREE.Object3D): void {
-  if (__DEV__) console.log('[glbLoader] disposeObject3D', root.type, root.uuid.slice(0, 8));
   root.traverse((child) => {
     const mesh = child as THREE.Mesh;
 
@@ -387,7 +377,6 @@ export function disposeObject3D(root: THREE.Object3D): void {
  * Safe to call even if the renderer was never used.
  */
 export function disposeRenderer(renderer: THREE.WebGLRenderer): void {
-  if (__DEV__) console.log('[glbLoader] disposeRenderer');
   try {
     renderer.renderLists.dispose();
     renderer.dispose();

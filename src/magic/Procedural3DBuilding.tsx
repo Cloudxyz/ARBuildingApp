@@ -382,6 +382,7 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   const texRef           = useRef<BuildingTextures | null>(null);
   const rendererRef      = useRef<THREE.WebGLRenderer | null>(null);
   const layoutSizeRef    = useRef({ width: 0, height: 0 });
+  const forceResizeRef   = useRef(false); // set true on focus-return to force viewport refresh
   const metricsTimeRef   = useRef(0);
   const onDebugMetricsRef = useRef(onDebugMetrics);
   const onZoomMetricsRef = useRef(onZoomMetrics);
@@ -420,6 +421,7 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   useEffect(() => {
     if (active) {
       warmupPendingRef.current = true;
+      forceResizeRef.current   = true; // re-apply viewport after tab-focus-return
       setIsWarmingUp(true);
     } else {
       warmupPendingRef.current = false;
@@ -448,15 +450,18 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     }
   }, []);
 
-  // ── Rebuild geometry whenever floor-count or footprint-scale changes ──────
-  // (normPoints stringify to detect polygon changes without infinite loops)
-  const normPointsKey = config.normPoints.map(p => `${p.x.toFixed(3)},${p.y.toFixed(3)}`).join('|');
+  // ── Rebuild geometry whenever floor-count, footprint-scale, or polygon changes ──
+  // Use animKey (incremented on every explicit Generate / Replay in MagicCanvasMode)
+  // instead of normPointsKey (a pixel-to-UV string that changes on any layout
+  // resize, including the 1-px panel shift when isPlaying flips Stop→Play).
+  // This prevents the spurious buildGeometry() call that was resetting distRef
+  // and causing the visible camera snap at the end of the build animation.
   useEffect(() => {
     // Delay slightly so configRef is updated before we read it
     const id = setTimeout(() => { buildGeometry(); }, 0);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.floorCount, config.footprintScale, normPointsKey]);
+  }, [config.floorCount, config.footprintScale, animKey]);
 
   // ── buildGeometry — tear down old group and rebuild from configRef ────────
   const buildGeometry = useCallback(async () => {
@@ -819,29 +824,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     // True visual center of the centered model bounds.
     centroidRef.current.copy(focusCenter);
     cameraTargetRef.current.copy(focusCenter);
-    // 3D marker "X" attached to the generated building so it moves with the model.
-    const markerSize = Math.max(0.35, Math.min(size.x, Math.max(0.35, size.y)) * 0.12);
-    const markerVerts = new Float32Array([
-      -markerSize, -markerSize, 0,
-      markerSize, markerSize, 0,
-      -markerSize, markerSize, 0,
-      markerSize, -markerSize, 0,
-    ]);
-    const markerGeo = new THREE.BufferGeometry();
-    markerGeo.setAttribute('position', new THREE.BufferAttribute(markerVerts, 3));
-    const markerMat = new THREE.LineBasicMaterial({
-      color: 0xff5555,
-      transparent: true,
-      opacity: 0.98,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false,
-    });
-    const markerX = new THREE.LineSegments(markerGeo, markerMat);
-    markerX.position.copy(focusCenter);
-    markerX.renderOrder = 999;
-    buildingGroup.add(markerX);
-    buildingMarkerRef.current = markerX;
 
     const cam = cameraRef.current;
     if (cam) {
@@ -939,9 +921,9 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     wasActiveRef.current = active;
     if (!becameActive || !glReady) return;
 
-    // Recenter when returning from another tab so stale camera offsets are cleared.
-    const raf = requestAnimationFrame(() => resetCamera());
-    return () => cancelAnimationFrame(raf);
+    // Recenter synchronously so distRef is correct before the first warmed-up frame
+    // renders and uncovers the view (avoids zoom-jump when "Preparing view" clears).
+    resetCamera();
   }, [active, glReady, resetCamera]);
 
   // ── Multi-touch PanResponder ──────────────────────────────────────────────
@@ -1027,14 +1009,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
 
         onPanResponderRelease: () => {
           pinchDistRef.current = 0;
-          if (interactionMode === 'moveModel' && movedModelInGestureRef.current) {
-            const m = latestMetricsRef.current;
-            if (m) {
-              console.log(
-                `[3D_MAGIC_RELEASE_LOG] pivot_x_screen=(${m.modelScreenX.toFixed(1)},${m.modelScreenY.toFixed(1)}) pivot_x_world=(${m.modelWorldX.toFixed(2)},${m.modelWorldY.toFixed(2)},${m.modelWorldZ.toFixed(2)}) building_coords=(${m.buildingCordsX.toFixed(2)},${m.buildingCordsY.toFixed(2)},${m.buildingCordsZ.toFixed(2)}) building_coords_screen=(${m.buildingCordsScreenX.toFixed(1)},${m.buildingCordsScreenY.toFixed(1)})`,
-              );
-            }
-          }
           movedModelInGestureRef.current = false;
         },
         onPanResponderTerminate: () => { pinchDistRef.current = 0; },
@@ -1315,14 +1289,14 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
       const cw = gl.drawingBufferWidth;
       const ch = gl.drawingBufferHeight;
       if (cw <= 0 || ch <= 0) return;
-      if (cw !== lastBufW || ch !== lastBufH) {
+      if (cw !== lastBufW || ch !== lastBufH || forceResizeRef.current) {
+        forceResizeRef.current = false;
         lastBufW = cw; lastBufH = ch;
         renderer.setSize(cw, ch, false);
         renderer.setViewport(0, 0, cw, ch);
         if (cameraRef.current) {
-          const aspectW = layoutSizeRef.current.width > 0 ? layoutSizeRef.current.width : cw;
-          const aspectH = layoutSizeRef.current.height > 0 ? layoutSizeRef.current.height : ch;
-          cameraRef.current.aspect = aspectW / Math.max(1, aspectH);
+          // Use buffer ratio — same aspect as layout, but never stale after tab-switch
+          cameraRef.current.aspect = cw / Math.max(1, ch);
           cameraRef.current.updateProjectionMatrix();
         }
       }
@@ -1358,9 +1332,8 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
       }
 
       if (cameraRef.current) {
-        // Keep camera projection aligned with the visible GL layout,
-        // even when drawingBuffer size has not changed yet.
-        const viewAspect = viewW / Math.max(1, viewH);
+        // Keep camera projection aligned with the GL buffer — buffer ratio is always correct.
+        const viewAspect = cw / Math.max(1, ch);
         if (Math.abs(cameraRef.current.aspect - viewAspect) > 0.0001) {
           cameraRef.current.aspect = viewAspect;
           cameraRef.current.updateProjectionMatrix();

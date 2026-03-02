@@ -34,6 +34,10 @@ import ViewShot from 'react-native-view-shot';
 import { Procedural3DBuilding } from './Procedural3DBuilding';
 
 import { NormPoint, BuildingFootprintConfig } from './types';
+import Building3DOverlay from '../ar/Building3DOverlay';
+import { ARModelConfig } from '../types';
+import { useUnitTypeModels } from '../hooks/useUnits';
+import { polygonToFootprint } from './PolygonToFootprint';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Phase = 'pick' | 'draw' | 'build3d';
@@ -45,6 +49,9 @@ export interface MagicBuildPanelState {
   zoomValue: number;
   canZoomIn: boolean;
   canZoomOut: boolean;
+  magicMode: 'generate' | 'model';
+  selectedModelType: 'house' | 'building' | 'commercial';
+  resolvedModelUrl: string | null;
 }
 
 // ── Snap (draw phase only) ────────────────────────────────────────────────────
@@ -101,6 +108,10 @@ interface Props {
   externalZoomCommandDir?: 'in' | 'out';
   externalZoomHoldDir?: -1 | 0 | 1;
   onBuildStateChange?: (state: MagicBuildPanelState) => void;
+  magicMode?: 'generate' | 'model';
+  selectedModelType?: 'house' | 'building' | 'commercial';
+  onMagicModeChange?: (mode: 'generate' | 'model') => void;
+  onModelTypeChange?: (type: 'house' | 'building' | 'commercial') => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -117,6 +128,10 @@ export default function MagicCanvasMode({
   externalZoomCommandDir = 'in',
   externalZoomHoldDir = 0,
   onBuildStateChange,
+  magicMode = 'generate',
+  selectedModelType = 'house',
+  onMagicModeChange,
+  onModelTypeChange,
 }: Props) {
   const [phase,       setPhase]     = useState<Phase>('pick');
   const [photoUri,    setPhotoUri]  = useState<string | null>(null);
@@ -127,7 +142,7 @@ export default function MagicCanvasMode({
   const [points,      setPoints]    = useState<Pt[]>([]);
   const [closed,      setClosed]    = useState(false);
   const [gridOn,      setGridOn]    = useState(true);
-  const [floorCount,  setFloorCount] = useState(5);
+  const [floorCount,  setFloorCount] = useState(magicMode === 'model' ? 20 : 5);
   const [isPlaying,      setIsPlaying]      = useState(false);
   const [animKey,        setAnimKey]        = useState(0);
   const [cameraResetKey, setCameraResetKey] = useState(0);
@@ -149,8 +164,17 @@ export default function MagicCanvasMode({
   const decFloorCommandRef = useRef(decFloorCommandId);
   const externalZoomCommandRef = useRef(externalZoomCommandId);
   const buildStateCbRef = useRef(onBuildStateChange);
+  const wasActiveRef = useRef(active);
+  const prevMagicModeRef = useRef(magicMode);
 
   const viewShotRef = useRef<ViewShot>(null);
+
+  // Global type model URLs (for model mode)
+  const { modelsByType } = useUnitTypeModels();
+  const resolvedModelUrl = useMemo(() => {
+    const m = modelsByType[selectedModelType];
+    return m?.model_glb_url ?? m?.external_model_glb_url ?? null;
+  }, [modelsByType, selectedModelType]);
 
   // Track actual canvas layout (may differ from prop if parent resizes)
   const onContainerLayout = useCallback((e: LayoutChangeEvent) => {
@@ -158,6 +182,23 @@ export default function MagicCanvasMode({
     setCanvasH(e.nativeEvent.layout.height);
   }, []);
   React.useEffect(() => { buildStateCbRef.current = onBuildStateChange; }, [onBuildStateChange]);
+  // Reset floors to mode default when mode switches
+  React.useEffect(() => {
+    setFloorCount(magicMode === 'model' ? 20 : 5);
+  }, [magicMode]);
+
+  // Auto-replay when returning to the tab in Generate mode, or when switching
+  // from Model → Generate, so the building never appears "cut".
+  React.useEffect(() => {
+    const becameActive = active && !wasActiveRef.current;
+    const switchedToGenerate = magicMode === 'generate' && prevMagicModeRef.current === 'model';
+    wasActiveRef.current = active;
+    prevMagicModeRef.current = magicMode;
+    if ((becameActive || switchedToGenerate) && phase === 'build3d' && magicMode === 'generate') {
+      setAnimKey((k) => k + 1);
+      setIsPlaying(true);
+    }
+  }, [active, phase, magicMode]);
   const handleZoomMetrics = useCallback((metrics: {
     zoomValue: number;
     canZoomIn: boolean;
@@ -280,8 +321,11 @@ export default function MagicCanvasMode({
       zoomValue: zoomUi,
       canZoomIn,
       canZoomOut,
+      magicMode,
+      selectedModelType,
+      resolvedModelUrl: resolvedModelUrl ?? null,
     });
-  }, [phase, isPlaying, floorCount, zoomUi, canZoomIn, canZoomOut]);
+  }, [phase, isPlaying, floorCount, zoomUi, canZoomIn, canZoomOut, magicMode, selectedModelType, resolvedModelUrl]);
 
   // ── Computed image rect ──────────────────────────────────────────────────
   const imgRect = useMemo(
@@ -338,6 +382,14 @@ export default function MagicCanvasMode({
     setPhase('build3d');
   }, [points, closed]);
 
+  // ── Place GLB model ───────────────────────────────────────────────────────
+  const handlePlaceModel = useCallback(() => {
+    if (!resolvedModelUrl || points.length < 3 || !closed) return;
+    setAnimKey(k => k + 1);
+    setIsPlaying(true);
+    setPhase('build3d');
+  }, [resolvedModelUrl, points, closed]);
+
   // ── Capture / share ───────────────────────────────────────────────────────
   const handleCapture = useCallback(async () => {
     try {
@@ -373,6 +425,25 @@ export default function MagicCanvasMode({
     footprintScale: 1,
     imageAspect:    imgRect.w > 0 ? imgRect.h / imgRect.w : 1,
   }), [normPoints, floorCount, imgRect]);
+
+  // ARModelConfig for model mode — footprint derived from the drawn polygon
+  const derivedConfig: ARModelConfig = useMemo(() => {
+    const fp = polygonToFootprint(normPoints);
+    return {
+      footprintW:       fp.width,
+      footprintH:       fp.depth,
+      floorCount,
+      buildSpeed:       4,
+      scale:            1,
+      rotationDeg:      0,
+      offsetX:          0,
+      offsetY:          0,
+      blueprintOpacity: 0,
+      shadowStrength:   0,
+      buildingType:     'residential',
+      colorScheme:      'warm',
+    };
+  }, [normPoints, floorCount]);
 
   // ── GLView bounds (fixed to full preview) ─────────────────────────────────
   // GL fills entire preview bounds.
@@ -551,7 +622,7 @@ export default function MagicCanvasMode({
           </Svg>
         </View>
 
-        {/* 3D building */}
+        {/* 3D building / model */}
         <View
           style={{
             position: 'absolute',
@@ -562,24 +633,42 @@ export default function MagicCanvasMode({
             overflow: 'hidden',
           }}
         >
-          <Procedural3DBuilding
-            config={config3d}
-            isPlaying={isPlaying}
-            animKey={animKey}
-            cameraResetKey={cameraResetKey}
-            active={active}
-            interactionMode="moveModel"
-            initialZoom={2.3}
-            onBuildComplete={() => setIsPlaying(false)}
-            zoomCommandId={zoomCmdId}
-            zoomCommandDir={zoomCmdDir}
-            zoomHoldDir={zoomHoldDir}
-            onZoomMetrics={handleZoomMetrics}
-            manualAzimuthDir={manualAzimuthDir}
-            manualElevationDir={manualElevationDir}
-            manualMoveYDir={manualMoveYDir}
-            gesturesDisabled={gesturesDisabled}
-          />
+          {magicMode === 'generate' ? (
+            <Procedural3DBuilding
+              config={config3d}
+              isPlaying={isPlaying}
+              animKey={animKey}
+              cameraResetKey={cameraResetKey}
+              active={active}
+              interactionMode="moveModel"
+              initialZoom={2.5}
+              onBuildComplete={() => setIsPlaying(false)}
+              zoomCommandId={zoomCmdId}
+              zoomCommandDir={zoomCmdDir}
+              zoomHoldDir={zoomHoldDir}
+              onZoomMetrics={handleZoomMetrics}
+              manualAzimuthDir={manualAzimuthDir}
+              manualElevationDir={manualElevationDir}
+              manualMoveYDir={manualMoveYDir}
+              gesturesDisabled={gesturesDisabled}
+            />
+          ) : (
+            <Building3DOverlay
+              config={derivedConfig}
+              modelUri={resolvedModelUrl}
+              constrainToFootprint
+              isPlaying={isPlaying}
+              animKey={animKey}
+              active={active}
+              width={canvasW}
+              height={canvasH}
+              zoomCommandId={zoomCmdId}
+              zoomCommandDir={zoomCmdDir}
+              zoomHoldDir={zoomHoldDir}
+              onZoomMetrics={handleZoomMetrics}
+              onBuildComplete={() => setIsPlaying(false)}
+            />
+          )}
         </View>
       </ViewShot>
 
@@ -597,15 +686,11 @@ export default function MagicCanvasMode({
           <TouchableOpacity style={[styles.toolBtn, styles.toolBtnCapture]} onPress={handleCapture}>
             <Text style={styles.toolBtnText}>📤</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.toolBtn, styles.toolBtnReset]}
-            onPress={() => setCameraResetKey(k => k + 1)}>
-            <Text style={[styles.toolBtnText, styles.toolBtnResetText]}>⟳</Text>
-          </TouchableOpacity>
         </View>
       )}
 
-      {/* Right-side gesture / camera control rack */}
-      <View style={styles.controlsRack} pointerEvents="box-none">
+      {/* Right-side gesture / camera control rack — only in generate mode */}
+      {magicMode === 'generate' && <View style={styles.controlsRack} pointerEvents="box-none">
         {/* Toggle gesture input */}
         <TouchableOpacity
           style={[styles.controlBtn, !gesturesDisabled && styles.controlBtnActive]}
@@ -681,7 +766,7 @@ export default function MagicCanvasMode({
         >
           <Text style={styles.controlBtnText}>{'\u27F3'}</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
     </View>
   );
 }
@@ -741,9 +826,7 @@ const styles = StyleSheet.create({
   toolBtnOn: { borderColor: ACCENT, backgroundColor: 'rgba(0,212,255,0.18)' },
   toolBtnCamera:  { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: TOOL_BG },
   toolBtnCapture: { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: TOOL_BG },
-  toolBtnReset:   { borderColor: 'rgba(255,255,255,0.35)', backgroundColor: TOOL_BG },
   toolBtnText: { color: '#ffffff', fontSize: 16, lineHeight: 20 },
-  toolBtnResetText: { fontSize: 20, lineHeight: 22, fontWeight: '700' },
   toolBtnTextDisabled: { color: 'rgba(221,238,255,0.35)' },
 
   // ── Bottom bar (draw) ─────────────────────────────────────────────────────
@@ -753,10 +836,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8,
     backgroundColor: 'rgba(0,0,0,0.55)', gap: 8,
   },
-  drawHint: { flex: 1, color: '#6688aa', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
-  genBtn:   { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: ACCENT, borderRadius: 6 },
-  genBtnText: { color: '#000', fontWeight: '800', fontSize: 12, letterSpacing: 0.5 },
+  drawHint: { flex: 1, color: 'rgba(255,255,255,0.6)', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  genBtn:        { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: ACCENT, borderRadius: 6 },
+  genBtnText:    { color: '#000', fontWeight: '800', fontSize: 12, letterSpacing: 0.5 },
+  genBtnDisabled: { backgroundColor: 'rgba(0,212,255,0.3)' },
 
+  // ── Mode toggle pill (draw bottom bar) ────────────────────────────────────
   // ── Floor label ───────────────────────────────────────────────────────────
   floorLabel:     { width: 38, height: 24, alignItems: 'center', justifyContent: 'center' },
   floorLabelText: { color: ACCENT, fontSize: 12, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
@@ -803,8 +888,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   controlBtn: {
-    width: 46,
-    height: 42,
+    width: 38,
+    height: 38,
     borderRadius: 8,
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
@@ -818,8 +903,8 @@ const styles = StyleSheet.create({
   },
   controlBtnText: {
     color: '#ffffff',
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '700' as const,
   },
   circleLeft: {

@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   brand: { marginBottom: 36 },
   brandTag: { color: ACCENT, fontSize: 10, fontFamily: 'monospace', letterSpacing: 4, marginBottom: 10 },
   brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '800', marginBottom: 6 },
-  brandSub: { color: '#555577', fontSize: 14 },
+  brandSub: { color: 'rgba(255,255,255,0.55)', fontSize: 14 },
   form: { marginBottom: 24, gap: 12 },
   input: {
     backgroundColor: '#0d0d22',
@@ -158,6 +158,6 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.6 },
   btnText: { color: BG, fontWeight: '800', fontSize: 14, letterSpacing: 3 },
-  switchText: { color: '#555577', textAlign: 'center', fontSize: 14 },
+  switchText: { color: 'rgba(255,255,255,0.55)', textAlign: 'center', fontSize: 14 },
 });
 

@@ -214,7 +214,6 @@ export const GLBModel: React.FC<GLBModelProps> = ({
           gl.endFrameEXP();
         };
         if (!rafActiveRef.current) { rafActiveRef.current = true; rafLoopStats.active += 1; }
-        if (__DEV__) console.log(`[GLBModel] GL session #${sessionId} RAF started, activeRAF=${rafLoopStats.active}`);
         raffRef.current = requestAnimationFrame(animate);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -231,7 +230,6 @@ export const GLBModel: React.FC<GLBModelProps> = ({
     if (sceneRef.current) { disposeObject3D(sceneRef.current); sceneRef.current = null; }
     if (rendererRef.current) { disposeRenderer(rendererRef.current); rendererRef.current = null; }
     if (rafActiveRef.current) { rafActiveRef.current = false; rafLoopStats.active -= 1; }
-    if (__DEV__) logGlbStats();
   }, []);
 
   // Error state — no fallback, show message only

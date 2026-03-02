@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   headerSub: {
-    color: '#555577',
+    color: 'rgba(255,255,255,0.55)',
     fontSize: 11,
     marginTop: 2,
     fontFamily: 'monospace',
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   unitDesc: {
-    color: '#888899',
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 11,
     lineHeight: 16,
   },
@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   presetsLabel: {
-    color: '#444466',
+    color: 'rgba(255,255,255,0.55)',
     fontSize: 9,
     fontFamily: 'monospace',
     letterSpacing: 2,
@@ -482,7 +482,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,212,255,0.07)',
   },
   presetBtnText: {
-    color: '#666688',
+    color: 'rgba(255,255,255,0.65)',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
     color: ACCENT,
   },
   presetFloors: {
-    color: '#444466',
+    color: 'rgba(255,255,255,0.4)',
     fontSize: 10,
     fontFamily: 'monospace',
     marginTop: 2,
@@ -517,7 +517,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   statLabel: {
-    color: '#444466',
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 8,
     fontFamily: 'monospace',
     letterSpacing: 0.5,
@@ -528,7 +528,7 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   isolationText: {
-    color: '#2a2a44',
+    color: 'rgba(255,255,255,0.2)',
     fontSize: 9,
     fontFamily: 'monospace',
     letterSpacing: 1,

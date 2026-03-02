@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   // Pick
   pickScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   pickTitle:  { color: '#00d4ff', fontSize: 28, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace', letterSpacing: 2, marginBottom: 10 },
-  pickSub:    { color: '#8899cc', fontSize: 14, textAlign: 'center', marginBottom: 40, lineHeight: 20 },
+  pickSub:    { color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center', marginBottom: 40, lineHeight: 20 },
   pickBtnRow: { flexDirection: 'row', gap: 16 },
   pickBtn:    {
     flex: 1,
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
   controlsContent:  { padding: PAD, gap: 10 },
   row:              { flexDirection: 'row', gap: 12 },
   ctrlRow:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
-  ctrlLabel:        { color: '#8899cc', fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
+  ctrlLabel:        { color: 'rgba(255,255,255,0.55)', fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' },
 
   stepper:          { flexDirection: 'row', alignItems: 'center', gap: 0 },
   stepBtn:          {
@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     borderRadius:    BTN_RADIUS,
     paddingVertical: 12,
   },
-  btnSecondaryText: { color: '#8899cc', fontSize: 13, fontWeight: '600' },
+  btnSecondaryText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
 
   btnAccent: {
     flex: 1,

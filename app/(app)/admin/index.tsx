@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
   },
   tabBtn:          { flex: 1, paddingVertical: 10, alignItems: 'center' },
   tabBtnActive:    { backgroundColor: 'rgba(0,212,255,0.12)' },
-  tabBtnText:      { color: '#66668a', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1.4, fontWeight: '700' },
+  tabBtnText:      { color: 'rgba(255,255,255,0.6)', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1.4, fontWeight: '700' },
   tabBtnTextActive:{ color: ACCENT },
 
   sectionHeader:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
@@ -437,12 +437,12 @@ const styles = StyleSheet.create({
   },
   cardHeader:      { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   cardName:        { flex: 1, color: '#eeeeff', fontSize: 15, fontWeight: '700' },
-  cardSub:         { color: '#555577', fontSize: 11, fontFamily: 'monospace', marginBottom: 2 },
+  cardSub:         { color: 'rgba(255,255,255,0.45)', fontSize: 11, fontFamily: 'monospace', marginBottom: 2 },
   cardFooter:      { flexDirection: 'row', gap: 8, marginTop: 10 },
   statusDot:       { width: 8, height: 8, borderRadius: 4 },
 
   rolePill:        { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, backgroundColor: 'rgba(255,255,255,0.06)' },
-  rolePillText:    { fontSize: 9, fontFamily: 'monospace', letterSpacing: 1, color: '#66668a', fontWeight: '700' },
+  rolePillText:    { fontSize: 9, fontFamily: 'monospace', letterSpacing: 1, color: 'rgba(255,255,255,0.5)', fontWeight: '700' },
   rolePillAdmin:   { backgroundColor: 'rgba(0,212,255,0.15)' },
   rolePillTextAdmin: { color: ACCENT },
 
@@ -457,5 +457,5 @@ const styles = StyleSheet.create({
   },
   actionBtnDanger: { borderColor: '#ff2f4530', backgroundColor: 'rgba(255,47,69,0.08)' },
   actionBtnDisabled: { opacity: 0.3 },
-  actionBtnText:   { color: '#aaaacc', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1, fontWeight: '700' },
+  actionBtnText:   { color: 'rgba(255,255,255,0.65)', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1, fontWeight: '700' },
 });
