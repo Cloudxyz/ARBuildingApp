@@ -57,7 +57,12 @@ export interface MagicBuildPanelState {
 // ── Snap (draw phase only) ────────────────────────────────────────────────────
 const CLOSE_RADIUS = 24;
 const AXIS_RATIO   = 0.28;
-const GRID_SIZE    = 16;
+// Grid size tunables — only affects 3D Magic view.
+// Increase GRID_CELL_SIZE for larger squares (easier point placement).
+// GRID_SCALE is a developer multiplier: 1 = normal, 2 = double-sized cells.
+const GRID_CELL_SIZE     = 40; // px — base grid cell size
+const GRID_SCALE         = 1;  // developer multiplier (1 = normal)
+const GRID_SIZE          = GRID_CELL_SIZE * GRID_SCALE;
 const ZOOM_HOLD_DELAY_MS = 140;
 
 function snap(raw: Pt, pts: Pt[], grid: boolean): { pt: Pt; close: boolean } {
