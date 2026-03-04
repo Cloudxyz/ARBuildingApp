@@ -278,6 +278,22 @@ export const IsometricBlueprintView: React.FC<Props> = ({
   useEffect(() => { isActiveRef.current = active; }, [active]);
   useEffect(() => { onBuildCompleteRef.current = onBuildComplete; }, [onBuildComplete]);
   useEffect(() => { gesturesEnabledRef.current = gesturesEnabled; }, [gesturesEnabled]);
+
+  // Evict any pre-existing scanline mesh on every play/stop cycle.
+  // The old RAF closure reads scanlineRef.current fresh each frame, so nulling
+  // it here (before the first frame of the new build) stops the old loop from
+  // ever making the scanline visible again — even across HMR sessions.
+  useEffect(() => {
+    const sl = scanlineRef.current;
+    if (sl) {
+      sl.visible = false;
+      sceneRef.current?.remove(sl);
+      (sl.geometry as THREE.BufferGeometry | undefined)?.dispose();
+      (sl.material as THREE.Material | undefined)?.dispose();
+    }
+    scanlineRef.current = null;
+    scanlineMatRef.current = null;
+  }, [active, animKey]);
   useEffect(() => {
     if (!active) {
       manualControlRef.current.azimuthDir = 0;
@@ -439,15 +455,10 @@ export const IsometricBlueprintView: React.FC<Props> = ({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
     scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-    const blueprintGrid = createBlueprintGrid({
-      size: BLUEPRINT_GRID_WORLD_SIZE,
-      divisions: BLUEPRINT_GRID_DIVISIONS,
-      majorEvery: BLUEPRINT_GRID_MAJOR_EVERY,
-      minorColor: BLUEPRINT_GRID_MINOR_COLOR,
-      majorColor: BLUEPRINT_GRID_MAJOR_COLOR,
-      opacity: BLUEPRINT_GRID_OPACITY,
-    });
-    scene.add(blueprintGrid);
+    // Grid is provided by the BlueprintOverlay SVG overlay (screen-anchored).
+    // The Three.js grid used to be added here as a world-space object which
+    // caused it to appear to rotate with the camera, creating a double-grid
+    // artifact. It has been intentionally removed.
 
     const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
     clipPlaneRef.current = clipPlane;
@@ -591,21 +602,16 @@ export const IsometricBlueprintView: React.FC<Props> = ({
       cameraZoomRef.current,
     );
 
-    const scanlineMat = new THREE.MeshBasicMaterial({
-      color: CYAN,
-      transparent: true,
-      opacity: 0.30,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const scanSize = Math.max(bW, bD) * 1.2;
-    const scanGeo = new THREE.PlaneGeometry(scanSize, scanSize);
-    scanGeo.rotateX(-Math.PI / 2);
-    const scanline = new THREE.Mesh(scanGeo, scanlineMat);
-    scanline.visible = false;
-    scene.add(scanline);
-    scanlineRef.current = scanline;
-    scanlineMatRef.current = scanlineMat;
+    // Scanline mesh intentionally removed — it produced a visible square plane
+    // sweeping upward before the model appeared, which was unwanted.
+    // Also evict any scanline left over from a previous context session.
+    if (scanlineRef.current) {
+      scene.remove(scanlineRef.current);
+      scanlineRef.current.geometry?.dispose();
+      (scanlineRef.current.material as THREE.Material)?.dispose();
+      scanlineRef.current = null;
+    }
+    scanlineMatRef.current = null;
 
     clipPlane.constant = modelMinY - 0.01;
     if (contextSessionRef.current === sessionId) {
@@ -668,15 +674,10 @@ export const IsometricBlueprintView: React.FC<Props> = ({
 
       const tH = totalHRef.current;
       const cp = clipPlaneRef.current;
-      const sl = scanlineRef.current;
-      const sm = scanlineMatRef.current;
 
       if (cp && tH > 0) {
         if (!isActiveRef.current && t <= 0) {
           cp.constant = modelMinY - 0.01;
-          if (scanlineRef.current) {
-            scanlineRef.current.visible = false;
-          }
           return;
         }
 
@@ -689,16 +690,6 @@ export const IsometricBlueprintView: React.FC<Props> = ({
         const revealY = modelMinY + revealFrac * targetFraction * tH;
 
         cp.constant = revealY;
-
-        if (sl && sm) {
-          if (t > 0.001 && t < 0.999) {
-            sl.visible = true;
-            sl.position.y = revealY;
-            sm.opacity = 0.20 + 0.15 * Math.sin(time * 0.006);
-          } else {
-            sl.visible = false;
-          }
-        }
       }
 
       const cw = gl.drawingBufferWidth;

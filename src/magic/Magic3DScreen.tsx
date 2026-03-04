@@ -7,7 +7,7 @@
  *   '3d'      → View the procedural 3D building
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -27,7 +27,13 @@ import ViewShot from 'react-native-view-shot';
 import PhotoCanvasWithPolygon, { PhotoCanvasHandle } from './PhotoCanvasWithPolygon';
 import { Procedural3DBuilding } from './Procedural3DBuilding';
 import { BuildingFootprintConfig, MagicPhase } from './types';
-import { normalizePoints } from './PolygonToFootprint';
+import { normalizePoints, pixelBBoxToMeters } from './PolygonToFootprint';
+import {
+  DEV_SHOW_METRICS,
+  computeFootprintMeasurements,
+  computeBuildingMeasurements,
+  type BuildingMeasurements,
+} from './gridConfig';
 
 interface Ctrl {
   floorCount:    number;
@@ -54,13 +60,21 @@ export default function Magic3DScreen() {
   const [ctrl, setCtrl]         = useState<Ctrl>(DEFAULT_CTRL);
   const [isPlaying, setIsPlaying] = useState(false);
   const [animKey, setAnimKey]   = useState(0);
+  /** Raw canvas-pixel points updated live via onPolygonChange; drives the drawing overlay. */
+  const [livePoints, setLivePoints] = useState<{ x: number; y: number }[]>([]);
+  /** Frozen footprint captured the moment Generate 3D is tapped (width/depth don't change after that). */
+  const [frozenMeasurements, setFrozenMeasurements] = useState<BuildingMeasurements | null>(null);
 
   const canvasRef   = useRef<PhotoCanvasHandle>(null);
   const viewShotRef = useRef<ViewShot>(null);
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
   const goTo = useCallback((p: MagicPhase) => setPhase(p), []);
-
+  /** Receives every point/close update from PhotoCanvasWithPolygon; drives live measurements. */
+  const handlePolygonChange = useCallback(
+    (pts: { x: number; y: number }[]) => setLivePoints(pts),
+    [],
+  );
   const goPickFromLibrary = useCallback(async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
@@ -103,10 +117,13 @@ export default function Magic3DScreen() {
       Alert.alert('Not ready', 'Draw a closed polygon with at least 3 points first.');
       return;
     }
+    // Freeze measurements at the moment the user commits
+    const fp = computeFootprintMeasurements(pts);
+    setFrozenMeasurements(computeBuildingMeasurements(fp, ctrl.floorCount, ctrl.floorHeightM));
     setIsPlaying(false);
     setAnimKey(k => k + 1);
     goTo('3d');
-  }, [goTo]);
+  }, [goTo, ctrl]);
 
   const goPlay = () => {
     setAnimKey(k => k + 1);
@@ -131,15 +148,32 @@ export default function Magic3DScreen() {
     }
   }, []);
 
+  // ── Live measurement (updates every time polygon changes) ─────────────────
+  const liveMeasurements = useMemo(
+    () => computeFootprintMeasurements(livePoints),
+    [livePoints],
+  );
+  /**
+   * Display measurements for the 3D phase: footprint from frozen snapshot, but
+   * height recomputed from the LIVE floor count so the stepper updates the label.
+   */
+  const displayMeasurements = useMemo(() => {
+    if (!frozenMeasurements) return null;
+    return computeBuildingMeasurements(frozenMeasurements, ctrl.floorCount, ctrl.floorHeightM);
+  }, [frozenMeasurements, ctrl.floorCount, ctrl.floorHeightM]);
   // ── BuildingFootprintConfig from canvas ───────────────────────────────────
   const getConfig = useCallback((): BuildingFootprintConfig => {
-    const pts    = canvasRef.current?.getPoints() ?? [];
-    const norm   = normalizePoints(pts, winW, canvasH);
+    const pts  = canvasRef.current?.getPoints() ?? [];
+    const norm = normalizePoints(pts, winW, canvasH);
+    // shared helper: 1 grid cell = METERS_PER_CELL metres
+    const { widthM: footprintWidthM, depthM: footprintDepthM } = pixelBBoxToMeters(pts);
     return {
-      normPoints:     norm,
-      floorCount:     ctrl.floorCount,
-      floorHeightM:   ctrl.floorHeightM,
-      footprintScale: ctrl.footprintScale,
+      normPoints:      norm,
+      floorCount:      ctrl.floorCount,
+      floorHeightM:    ctrl.floorHeightM,
+      footprintScale:  ctrl.footprintScale,
+      footprintWidthM,
+      footprintDepthM,
     };
   }, [ctrl, winW, canvasH]);
 
@@ -184,8 +218,24 @@ export default function Magic3DScreen() {
             width={winW}
             height={canvasH}
             photoUri={photoUri ?? ''}
+            onPolygonChange={handlePolygonChange}
           />
         </View>
+
+        {/* Live measurement strip — above the Generate button; updates on every polygon change */}
+        {livePoints.length >= 2 && (
+          <View style={styles.measureStrip} pointerEvents="none">
+            <View style={styles.measureCell}>
+              <Text style={styles.measureLabel}>Width</Text>
+              <Text style={styles.measureValue}>{liveMeasurements.widthLabel}</Text>
+            </View>
+            <View style={styles.measureDivider} />
+            <View style={styles.measureCell}>
+              <Text style={styles.measureLabel}>Depth</Text>
+              <Text style={styles.measureValue}>{liveMeasurements.depthLabel}</Text>
+            </View>
+          </View>
+        )}
 
         {/* Bottom controls */}
         <View style={styles.polygonBottom}>
@@ -222,11 +272,46 @@ export default function Magic3DScreen() {
           isPlaying={isPlaying}
           animKey={animKey}
         />
+        {/* DEV: metric overlay — set DEV_SHOW_METRICS=true in gridConfig.ts to enable */}
+        {DEV_SHOW_METRICS && (
+          <View pointerEvents="none" style={{
+            position: 'absolute', top: 8, left: 8,
+            backgroundColor: 'rgba(0,0,0,0.70)',
+            borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6,
+            borderWidth: 1, borderColor: 'rgba(0,212,255,0.4)',
+          }}>
+            <Text style={{ color: '#00d4ff', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' }}>
+              {`Footprint: ${(cfg3d.footprintWidthM ?? 0).toFixed(1)}m × ${(cfg3d.footprintDepthM ?? 0).toFixed(1)}m`}
+            </Text>
+            <Text style={{ color: '#00d4ff', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' }}>
+              {`Height: ${cfg3d.floorCount} × ${cfg3d.floorHeightM}m = ${(cfg3d.floorCount * cfg3d.floorHeightM).toFixed(1)}m`}
+            </Text>
+          </View>
+        )}
       </ViewShot>
 
       {/* Controls */}
       <ScrollView style={styles.controlsScroll} contentContainerStyle={styles.controlsContent} keyboardShouldPersistTaps="handled">
-        {/* Playback row */}
+        {/* Measurement strip — above play button; updates height live when floors change */}
+        {displayMeasurements && (
+          <View style={styles.measureStrip}>
+            <View style={styles.measureCell}>
+              <Text style={styles.measureLabel}>Width</Text>
+              <Text style={styles.measureValue}>{displayMeasurements.widthLabel}</Text>
+            </View>
+            <View style={styles.measureDivider} />
+            <View style={styles.measureCell}>
+              <Text style={styles.measureLabel}>Depth</Text>
+              <Text style={styles.measureValue}>{displayMeasurements.depthLabel}</Text>
+            </View>
+            <View style={styles.measureDivider} />
+            <View style={styles.measureCell}>
+              <Text style={styles.measureLabel}>Height</Text>
+              <Text style={styles.measureValue}>{displayMeasurements.heightLabel}</Text>
+            </View>
+          </View>
+        )}
+        {/* Playback row */}}
         <View style={styles.row}>
           <TouchableOpacity style={styles.btnSecondary} onPress={goStop} activeOpacity={0.8}>
             <Text style={styles.btnSecondaryText}>■ Stop</Text>
@@ -353,4 +438,43 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   btnAccentText: { color: '#000', fontSize: 14, fontWeight: '800' },
+
+  // ── Measurement overlays ─────────────────────────────────────────────────
+  /** Inline horizontal strip, full width, above the button row below it. */
+  measureStrip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,212,255,0.30)',
+    paddingVertical: 5,
+    paddingHorizontal: 4,
+  },
+  measureCell: {
+    flex: 1,
+    alignItems: 'center' as const,
+  },
+  measureDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(0,212,255,0.25)',
+  },
+  /** Unused — kept as no-op so any stale ref doesn't crash */
+  measureOverlayLive:   { position: 'absolute' as const, bottom: -9999, opacity: 0 },
+  measureOverlayFrozen: { position: 'absolute' as const, bottom: -9999, opacity: 0 },
+  measureLabel: {
+    color: 'rgba(0,212,255,0.82)',
+    fontSize: 8,
+    fontWeight: '700' as const,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+  },
+  measureValue: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 0.2,
+    marginTop: 1,
+  },
 });

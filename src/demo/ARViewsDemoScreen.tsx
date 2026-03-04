@@ -99,6 +99,7 @@ export default function ARViewsDemoScreen() {
     magicMode: 'generate',
     selectedModelType: 'house',
     resolvedModelUrl: null,
+    displayMeasurements: null,
   });
   const [magicMode, setMagicMode] = useState<'generate' | 'model'>('generate');
   const [magicSelectedType, setMagicSelectedType] = useState<'house' | 'building' | 'commercial'>('house');
@@ -568,7 +569,26 @@ export default function ARViewsDemoScreen() {
             );
           }}
         >
-        <View style={styles.row}>
+        {/* Measurement strip — draw & build3d phases, above Play */}
+          {isMagicMode && magicBuildState.displayMeasurements && (
+            <View style={styles.measureStrip}>
+              <View style={styles.measureCell}>
+                <Text style={styles.measureLabel}>Width</Text>
+                <Text style={styles.measureValue}>{magicBuildState.displayMeasurements.widthLabel}</Text>
+              </View>
+              <View style={styles.measureDivider} />
+              <View style={styles.measureCell}>
+                <Text style={styles.measureLabel}>Depth</Text>
+                <Text style={styles.measureValue}>{magicBuildState.displayMeasurements.depthLabel}</Text>
+              </View>
+              <View style={styles.measureDivider} />
+              <View style={styles.measureCell}>
+                <Text style={styles.measureLabel}>Height</Text>
+                <Text style={styles.measureValue}>{magicBuildState.displayMeasurements.heightLabel}</Text>
+              </View>
+            </View>
+          )}
+          <View style={styles.row}>
           <TouchableOpacity
             style={[
               styles.playBtn,
@@ -835,6 +855,40 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   hint: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontFamily: 'monospace', textAlign: 'center', paddingTop: 4 },
+
+  measureStrip: {
+    flexDirection: 'row' as const,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.18)',
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  measureCell: {
+    flex: 1,
+    alignItems: 'center' as const,
+    paddingVertical: 7,
+  },
+  measureDivider: {
+    width: 1,
+    backgroundColor: 'rgba(0,212,255,0.18)',
+    marginVertical: 6,
+  },
+  measureLabel: {
+    color: '#00d4ff',
+    fontSize: 8,
+    letterSpacing: 1.5,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    textTransform: 'uppercase' as const,
+    marginBottom: 2,
+  },
+  measureValue: {
+    color: '#eeeeff',
+    fontSize: 11,
+    fontWeight: '700' as const,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   typeChip: {

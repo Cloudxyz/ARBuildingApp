@@ -649,7 +649,10 @@ export const Building3DOverlay: React.FC<Building3DOverlayProps> = ({
 
     // -- Frame camera ---------------------------------------------------------
     const radius = Math.sqrt((size.x / 2) ** 2 + (size.y / 2) ** 2 + (size.z / 2) ** 2);
-    cameraTargetRef.current.set(0, size.y * 0.45 - center.y, 0);
+    // Target 45 % up from the model bottom in the *centred* world coordinate system.
+    // modelMinY is already expressed in centred world-space (box.min.y - center.y),
+    // so this is correct regardless of where the model's geometry starts on Y.
+    cameraTargetRef.current.set(0, modelMinY + size.y * 0.45, 0);
     distRef.current = frameCameraOnRadius(
       camera, radius, azimuthRef.current, elevationRef.current, cameraTargetRef.current,
     );

@@ -36,7 +36,7 @@ serve(async (req) => {
     // ── 1. Verify caller is authenticated ────────────────────────────────────
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return json({ error: 'Missing authorization header' }, 401);
+      return json({ ok: false, error: 'Missing authorization header' }, 401);
     }
 
     // Caller-scoped client (uses caller's JWT — respects RLS)
@@ -47,14 +47,14 @@ serve(async (req) => {
     // ── 2. Verify caller is master_admin ─────────────────────────────────────
     const { data: roleData, error: roleErr } = await callerClient.rpc('get_my_role');
     if (roleErr || roleData !== 'master_admin') {
-      return json({ error: 'Forbidden: master_admin role required' }, 403);
+      return json({ ok: false, error: `Forbidden: master_admin role required${roleErr ? ` (${roleErr.message})` : ''}` }, 403);
     }
 
     // ── 3. Parse target userId ────────────────────────────────────────────────
     const body = await req.json().catch(() => ({}));
     const userId: string = body?.userId;
     if (!userId || typeof userId !== 'string') {
-      return json({ error: 'Missing or invalid userId in request body' }, 400);
+      return json({ ok: false, error: 'Missing or invalid userId in request body' }, 400);
     }
 
     // ── 4. Hard-delete via service-role admin API ─────────────────────────────
@@ -65,13 +65,13 @@ serve(async (req) => {
     const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId);
     if (deleteErr) {
       console.error('auth.admin.deleteUser error:', deleteErr);
-      return json({ error: deleteErr.message }, 500);
+      return json({ ok: false, error: deleteErr.message }, 500);
     }
 
     return json({ ok: true });
   } catch (err) {
     console.error('Unexpected error:', err);
-    return json({ error: 'Internal server error' }, 500);
+    return json({ ok: false, error: 'Internal server error' }, 500);
   }
 });
 

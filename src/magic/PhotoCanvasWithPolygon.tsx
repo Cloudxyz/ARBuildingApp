@@ -5,7 +5,7 @@
  * Uses react-native-svg for rendering + PanResponder for gesture capture.
  */
 
-import React, { useCallback, useImperativeHandle, useRef, useState } from 'react';
+import React, { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   Image,
   PanResponder,
@@ -18,6 +18,7 @@ import {
 import Svg, { Circle, Line, Polygon, Polyline } from 'react-native-svg';
 import { applySnapping, rectangleFromDiagonal, snapDrag, SNAP_CLOSE_RADIUS } from './snapUtils';
 import { CanvasPoint } from './types';
+import { GRID_SIZE } from './gridConfig'; // single source of truth — edit gridConfig.ts to change grid size
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCENT        = '#00d4ff';
@@ -257,6 +258,29 @@ const PhotoCanvasWithPolygon = React.forwardRef<PhotoCanvasHandle, PhotoCanvasWi
       setRectMode(rectRef.current);
     }, []);
 
+    // ── Grid lines (memoized, regenerated only when canvas dims or GRID_SIZE changes) ──
+    const gridLines = useMemo(() => {
+      if (!gridEnabled) return null;
+      const lines: React.ReactElement[] = [];
+      const cols = Math.ceil(width  / GRID_SIZE);
+      const rows = Math.ceil(height / GRID_SIZE);
+      for (let c = 1; c < cols; c++) {
+        lines.push(
+          <Line key={`gv${c}`}
+            x1={c * GRID_SIZE} y1={0} x2={c * GRID_SIZE} y2={height}
+            stroke="rgba(0,212,255,0.12)" strokeWidth="0.5" />,
+        );
+      }
+      for (let r = 1; r < rows; r++) {
+        lines.push(
+          <Line key={`gh${r}`}
+            x1={0} y1={r * GRID_SIZE} x2={width} y2={r * GRID_SIZE}
+            stroke="rgba(0,212,255,0.12)" strokeWidth="0.5" />,
+        );
+      }
+      return lines;
+    }, [gridEnabled, width, height]);
+
     // ── SVG helpers ───────────────────────────────────────────────────────────
     const polyPoints = points.map((p) => `${p.x},${p.y}`).join(' ');
 
@@ -280,6 +304,8 @@ const PhotoCanvasWithPolygon = React.forwardRef<PhotoCanvasHandle, PhotoCanvasWi
             style={StyleSheet.absoluteFill}
             pointerEvents="none"
           >
+            {/* Grid lines — only visible when snap-to-grid is ON */}
+            {gridLines}
             {/* Polygon fill when closed */}
             {closed && points.length >= 3 && (
               <Polygon

@@ -38,6 +38,18 @@ export interface BuildingFootprintConfig {
    * Defaults to 1 if omitted.
    */
   imageAspect?: number;
+  /**
+   * Pre-computed footprint width in meters, derived from the drawn polygon's
+   * pixel bounding box via pxToMeters(). When present, the geometry builder
+   * uses this instead of the legacy scaleM squeeze.
+   */
+  footprintWidthM?: number;
+  /**
+   * Pre-computed footprint depth in meters, derived from the drawn polygon's
+   * pixel bounding box via pxToMeters(). When present, the geometry builder
+   * uses this instead of the legacy scaleM squeeze.
+   */
+  footprintDepthM?: number;
 }
 
 /** Screen phases for Magic3DScreen */

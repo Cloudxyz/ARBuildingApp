@@ -91,7 +91,7 @@ export default function AnimatedInput({
 
   // ── Split style into container props vs TextInput text/padding props ────────
   // This allows the caller to pass the same `style` they'd give a bare TextInput.
-  const { containerStyle: flatContainer, inputStyle: flatInput } = useMemo(() => {
+  const { containerStyle: flatContainer, inputStyle: flatInput, outerLayoutStyle } = useMemo(() => {
     const flat = StyleSheet.flatten(style as StyleProp<TextStyle & ViewStyle>) ?? {};
     const {
       // Pure text / font props → inner TextInput only
@@ -112,7 +112,27 @@ export default function AnimatedInput({
       color, fontSize, fontFamily, fontWeight, fontStyle,
       letterSpacing, lineHeight, textAlign, textAlignVertical,
     };
-    return { containerStyle: rest as ViewStyle, inputStyle: inputStyle as TextStyle };
+
+    // Layout props that must also be on the outer <View> wrapper so that
+    // flex/width/margin from the caller actually affect the overall element size.
+    const LAYOUT_KEYS = [
+      'flex', 'flexGrow', 'flexShrink', 'flexBasis',
+      'width', 'minWidth', 'maxWidth',
+      'height', 'minHeight', 'maxHeight',
+      'alignSelf', 'position', 'top', 'bottom', 'left', 'right',
+      'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
+      'marginHorizontal', 'marginVertical',
+    ] as const;
+    const outerLayout: Record<string, unknown> = {};
+    for (const key of LAYOUT_KEYS) {
+      if (key in rest) outerLayout[key] = rest[key as keyof typeof rest];
+    }
+
+    return {
+      containerStyle: rest as ViewStyle,
+      inputStyle: inputStyle as TextStyle,
+      outerLayoutStyle: outerLayout as ViewStyle,
+    };
   }, [style]);
 
   // ── Shake on shakeKey change ────────────────────────────────────────────────
@@ -171,7 +191,7 @@ export default function AnimatedInput({
   }));
 
   return (
-    <View>
+    <View style={outerLayoutStyle}>
       <Animated.View style={[styles.containerBase, flatContainer, animContainerStyle]}>
         <TextInput
           style={[styles.textInputBase, flatInput]}

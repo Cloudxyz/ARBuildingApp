@@ -15,18 +15,24 @@
  *   (canvas coords), so the building appears in the right place visually.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   LayoutChangeEvent,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { supabase } from '../lib/supabase';
+import { FloorPicker } from '../tours/FloorPicker';
+import { FloorTourModal } from './FloorTourModal';
+import { normalizeFloors, getFloorsTotalFromArr, getTourUrlFromArr } from '../lib/floors';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
@@ -35,9 +41,16 @@ import { Procedural3DBuilding } from './Procedural3DBuilding';
 
 import { NormPoint, BuildingFootprintConfig } from './types';
 import Building3DOverlay from '../ar/Building3DOverlay';
-import { ARModelConfig } from '../types';
-import { useUnitTypeModels } from '../hooks/useUnits';
+import { ARModelConfig, resolveGlbSource, UnitType } from '../types';
+import { useUnitTypeModels, useUnitGlbModels } from '../hooks/useUnits';
 import { polygonToFootprint } from './PolygonToFootprint';
+import {
+  GRID_SIZE,
+  DEV_SHOW_METRICS,
+  computeFootprintMeasurements,
+  computeBuildingMeasurements,
+  type BuildingMeasurements,
+} from './gridConfig'; // single source of truth — edit gridConfig.ts to change grid size
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Phase = 'pick' | 'draw' | 'build3d';
@@ -52,17 +65,13 @@ export interface MagicBuildPanelState {
   magicMode: 'generate' | 'model';
   selectedModelType: 'house' | 'building' | 'commercial';
   resolvedModelUrl: string | null;
+  displayMeasurements: BuildingMeasurements | null;
 }
 
 // ── Snap (draw phase only) ────────────────────────────────────────────────────
 const CLOSE_RADIUS = 24;
 const AXIS_RATIO   = 0.28;
-// Grid size tunables — only affects 3D Magic view.
-// Increase GRID_CELL_SIZE for larger squares (easier point placement).
-// GRID_SCALE is a developer multiplier: 1 = normal, 2 = double-sized cells.
-const GRID_CELL_SIZE     = 40; // px — base grid cell size
-const GRID_SCALE         = 1;  // developer multiplier (1 = normal)
-const GRID_SIZE          = GRID_CELL_SIZE * GRID_SCALE;
+// GRID_SIZE is imported from gridConfig.ts above — do not redeclare it here.
 const ZOOM_HOLD_DELAY_MS = 140;
 
 function snap(raw: Pt, pts: Pt[], grid: boolean): { pt: Pt; close: boolean } {
@@ -117,6 +126,15 @@ interface Props {
   selectedModelType?: 'house' | 'building' | 'commercial';
   onMagicModeChange?: (mode: 'generate' | 'model') => void;
   onModelTypeChange?: (type: 'house' | 'building' | 'commercial') => void;
+  // ── Exploded View ─────────────────────────────────────────────────
+  explodeEnabled?: boolean;
+  explodeSeparation?: number;
+  explodeSelectedFloor?: number | 'all';
+  onFloorGroupsReady?: (count: number) => void;
+  /** Unit id used to look up per-floor Matterport tour URLs. Optional. */
+  unitId?: string;
+  /** Matterport URL array for this unit's floors (units.floors column). */
+  floors?: string[];
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -137,6 +155,12 @@ export default function MagicCanvasMode({
   selectedModelType = 'house',
   onMagicModeChange,
   onModelTypeChange,
+  explodeEnabled = false,
+  explodeSeparation = 0,
+  explodeSelectedFloor = 'all' as number | 'all',
+  onFloorGroupsReady,
+  unitId = '',
+  floors = [],
 }: Props) {
   const [phase,       setPhase]     = useState<Phase>('pick');
   const [photoUri,    setPhotoUri]  = useState<string | null>(null);
@@ -161,6 +185,19 @@ export default function MagicCanvasMode({
   const [manualElevationDir, setManualElevationDir] = useState<-1 | 0 | 1>(0);
   const [manualMoveYDir,     setManualMoveYDir]     = useState<-1 | 0 | 1>(0);
   const [gesturesDisabled,   setGesturesDisabled]   = useState(false);
+  /** Frozen snapshot of footprint + height taken the moment Generate (or Place Model) is tapped. */
+  const [frozenMeasurements, setFrozenMeasurements] = useState<BuildingMeasurements | null>(null);
+  // ── Floor Tour state ────────────────────────────────────────────────────────
+  const [tourFloor,        setTourFloor]        = useState(1);
+  const [tourModalVisible, setTourModalVisible] = useState(false);
+  const normFloors = normalizeFloors(floors);
+  /** Instant lookup — no parse hit when tapping a floor chip. */
+  const tourUrl = getTourUrlFromArr(normFloors, tourFloor);
+  /** Number of floors derived from saved tours — source of truth for tour navigation. */
+  const floorsFromTours = getFloorsTotalFromArr(normFloors);
+  /** True when the user left the tab while in build3d and we reset to draw. */
+  const [pausedMsg, setPausedMsg] = useState(false);
+  const floorSyncDoneRef = useRef(false);
   const zoomHoldStartedRef = useRef(false);
   const zoomHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playCommandRef = useRef(playCommandId);
@@ -174,12 +211,20 @@ export default function MagicCanvasMode({
 
   const viewShotRef = useRef<ViewShot>(null);
 
-  // Global type model URLs (for model mode)
+  // Global type model URLs (for model mode - fallback when no per-unit model exists)
   const { modelsByType } = useUnitTypeModels();
+  // Per-unit GLB models — same source as 3D View (unit_glb_models table)
+  const { byType: unitGlbByType } = useUnitGlbModels(unitId);
   const resolvedModelUrl = useMemo(() => {
+    // Prefer per-unit model (mirrors exactly what 3D View shows)
+    if (unitId) {
+      const perUnit = resolveGlbSource(unitGlbByType, selectedModelType as UnitType);
+      if (perUnit) return perUnit;
+    }
+    // Fall back to global type template
     const m = modelsByType[selectedModelType];
     return m?.model_glb_url ?? m?.external_model_glb_url ?? null;
-  }, [modelsByType, selectedModelType]);
+  }, [unitId, unitGlbByType, modelsByType, selectedModelType]);
 
   // Track actual canvas layout (may differ from prop if parent resizes)
   const onContainerLayout = useCallback((e: LayoutChangeEvent) => {
@@ -187,19 +232,50 @@ export default function MagicCanvasMode({
     setCanvasH(e.nativeEvent.layout.height);
   }, []);
   React.useEffect(() => { buildStateCbRef.current = onBuildStateChange; }, [onBuildStateChange]);
+
+  // Reset tour floor selection when floor count shrinks below selected
+  useEffect(() => {
+    setTourFloor(f => Math.min(f, floorCount));
+  }, [floorCount]);
+
+  // Seed floorCount from saved floor data once (generate mode only)
+  useEffect(() => {
+    if (floorSyncDoneRef.current || magicMode !== 'generate') return;
+    if (floorsFromTours > 1) setFloorCount(floorsFromTours);
+    floorSyncDoneRef.current = true;
+  }, [floors, floorsFromTours, magicMode]);
+
   // Reset floors to mode default when mode switches
   React.useEffect(() => {
-    setFloorCount(magicMode === 'model' ? 20 : 5);
+    if (magicMode === 'model') {
+      setFloorCount(20);
+    } else {
+      // Respect tour-derived count when switching back to generate
+      setFloorCount(floorSyncDoneRef.current && floorsFromTours > 1 ? floorsFromTours : 5);
+    }
   }, [magicMode]);
 
-  // Auto-replay when returning to the tab in Generate mode, or when switching
-  // from Model → Generate, so the building never appears "cut".
+  // Tab lifecycle:
+  //   blur → if in build3d, retreat to draw so the GLView unmounts cleanly.
+  //          Photo + polygon points remain in state; no GL rebuild needed.
+  //   focus → nothing to do; draw phase already shows photo + vectors + Generate button.
+  //   mode switch model→generate (same active session) → still replay the build.
   React.useEffect(() => {
-    const becameActive = active && !wasActiveRef.current;
+    const becameInactive = !active && wasActiveRef.current;
     const switchedToGenerate = magicMode === 'generate' && prevMagicModeRef.current === 'model';
     wasActiveRef.current = active;
     prevMagicModeRef.current = magicMode;
-    if ((becameActive || switchedToGenerate) && phase === 'build3d' && magicMode === 'generate') {
+
+    // On tab blur while generating/previewing: retreat to draw, GLView unmounts harmlessly.
+    if (becameInactive && phase === 'build3d') {
+      setIsPlaying(false);
+      setPhase('draw');
+      setPausedMsg(true);
+      return;
+    }
+
+    // Mode switch model→generate inside the same active session (not a tab-return).
+    if (switchedToGenerate && active && phase === 'build3d') {
       setAnimKey((k) => k + 1);
       setIsPlaying(true);
     }
@@ -318,7 +394,25 @@ export default function MagicCanvasMode({
     setZoomHoldDir(externalZoomHoldDir);
   }, [externalZoomHoldDir, canZoomIn, canZoomOut]);
 
+  // ── Live polygon measurements (metres + feet) ───────────────────────────
+  // Declared HERE — before the state emission effect — so it is a real value
+  // in the deps array and the effect re-fires on every polygon change.
+  const footprintMeasurements = useMemo(
+    () => computeFootprintMeasurements(points),
+    [points],
+  );
+
   React.useEffect(() => {
+    let displayMeasurements: BuildingMeasurements | null = null;
+    if (phase === 'draw') {
+      // Show live Width/Depth/Height in the footer while the user is drawing.
+      // widthM > 0 means at least 2 distinct points exist (bbox is non-zero).
+      if (footprintMeasurements.widthM > 0 || footprintMeasurements.depthM > 0) {
+        displayMeasurements = computeBuildingMeasurements(footprintMeasurements, floorCount);
+      }
+    } else if (frozenMeasurements) {
+      displayMeasurements = computeBuildingMeasurements(frozenMeasurements, floorCount);
+    }
     buildStateCbRef.current?.({
       phase,
       isPlaying,
@@ -329,8 +423,9 @@ export default function MagicCanvasMode({
       magicMode,
       selectedModelType,
       resolvedModelUrl: resolvedModelUrl ?? null,
+      displayMeasurements,
     });
-  }, [phase, isPlaying, floorCount, zoomUi, canZoomIn, canZoomOut, magicMode, selectedModelType, resolvedModelUrl]);
+  }, [phase, isPlaying, floorCount, zoomUi, canZoomIn, canZoomOut, magicMode, selectedModelType, resolvedModelUrl, frozenMeasurements, footprintMeasurements]);
 
   // ── Computed image rect ──────────────────────────────────────────────────
   const imgRect = useMemo(
@@ -339,7 +434,7 @@ export default function MagicCanvasMode({
   );
 
   // ── Photo picking ─────────────────────────────────────────────────────────
-  const resetDraw = () => { setPoints([]); setClosed(false); setIsPlaying(false); setAnimKey(0); };
+  const resetDraw = () => { setPoints([]); setClosed(false); setIsPlaying(false); setAnimKey(0); setFrozenMeasurements(null); };
 
   const applyAsset = useCallback((asset: ImagePicker.ImagePickerAsset) => {
     setPhotoUri(asset.uri);
@@ -382,18 +477,25 @@ export default function MagicCanvasMode({
       Alert.alert('Not ready', 'Close the polygon first (3+ points, tap near first dot).');
       return;
     }
+    // Freeze measurements the moment the user commits — floor height is always 3 m (default)
+    const fp = computeFootprintMeasurements(points);
+    setFrozenMeasurements(computeBuildingMeasurements(fp, floorCount));
+    setPausedMsg(false);
     setAnimKey(k => k + 1);
     setIsPlaying(true);
     setPhase('build3d');
-  }, [points, closed]);
+  }, [points, closed, floorCount]);
 
   // ── Place GLB model ───────────────────────────────────────────────────────
   const handlePlaceModel = useCallback(() => {
     if (!resolvedModelUrl || points.length < 3 || !closed) return;
+    const fp = computeFootprintMeasurements(points);
+    setFrozenMeasurements(computeBuildingMeasurements(fp, floorCount));
+    setPausedMsg(false);
     setAnimKey(k => k + 1);
     setIsPlaying(true);
     setPhase('build3d');
-  }, [resolvedModelUrl, points, closed]);
+  }, [resolvedModelUrl, points, closed, floorCount]);
 
   // ── Capture / share ───────────────────────────────────────────────────────
   const handleCapture = useCallback(async () => {
@@ -409,7 +511,8 @@ export default function MagicCanvasMode({
   }, []);
 
   // ── Derived polygon display strings (canvas coords) ───────────────────────
-  const polyStr = points.map(p => `${p.x},${p.y}`).join(' ');
+  // Memoized: change only when the points array reference changes.
+  const polyStr = useMemo(() => points.map(p => `${p.x},${p.y}`).join(' '), [points]);
   const firstPt = points[0];
   const lastPt  = points[points.length - 1];
 
@@ -423,17 +526,51 @@ export default function MagicCanvasMode({
     }));
   }, [points, imgRect]);
 
+  // footprintMeasurements is declared above the state emission effect (search for
+  // "Live polygon measurements" near the top of this component).
+
   const config3d: BuildingFootprintConfig = useMemo(() => ({
     normPoints,
     floorCount,
-    floorHeightM:   3,
-    footprintScale: 1,
-    imageAspect:    imgRect.w > 0 ? imgRect.h / imgRect.w : 1,
-  }), [normPoints, floorCount, imgRect]);
+    floorHeightM:    3,
+    footprintScale:  1,
+    imageAspect:     imgRect.w > 0 ? imgRect.h / imgRect.w : 1,
+    footprintWidthM: footprintMeasurements.widthM,
+    footprintDepthM: footprintMeasurements.depthM,
+  }), [normPoints, floorCount, imgRect, footprintMeasurements]);
+
+  // ── Memoized SVG grid lines (expensive when canvas is large) ─────────────
+  // Regenerated only when grid is toggled or canvas size changes — never on tap.
+  const svgGridLines = useMemo(() => {
+    if (!gridOn) return null;
+    const lines: React.ReactElement[] = [];
+    const cols = Math.ceil(canvasW / GRID_SIZE);
+    const rows = Math.ceil(canvasH / GRID_SIZE);
+    for (let c = 1; c < cols; c++) {
+      lines.push(
+        <Line key={`gv${c}`}
+          x1={c * GRID_SIZE} y1={0} x2={c * GRID_SIZE} y2={canvasH}
+          stroke="rgba(0,212,255,0.12)" strokeWidth="0.5" />,
+      );
+    }
+    for (let r = 1; r < rows; r++) {
+      lines.push(
+        <Line key={`gh${r}`}
+          x1={0} y1={r * GRID_SIZE} x2={canvasW} y2={r * GRID_SIZE}
+          stroke="rgba(0,212,255,0.12)" strokeWidth="0.5" />,
+      );
+    }
+    return lines;
+  }, [gridOn, canvasW, canvasH]);
 
   // ARModelConfig for model mode — footprint derived from the drawn polygon
   const derivedConfig: ARModelConfig = useMemo(() => {
-    const fp = polygonToFootprint(normPoints);
+    const fp = polygonToFootprint(
+      normPoints,
+      12,                         // legacy scaleM (ignored when metric dims present)
+      footprintMeasurements.widthM || undefined,
+      footprintMeasurements.depthM || undefined,
+    );
     return {
       footprintW:       fp.width,
       footprintH:       fp.depth,
@@ -448,7 +585,7 @@ export default function MagicCanvasMode({
       buildingType:     'residential',
       colorScheme:      'warm',
     };
-  }, [normPoints, floorCount]);
+  }, [normPoints, floorCount, footprintMeasurements]);
 
   // ── GLView bounds (fixed to full preview) ─────────────────────────────────
   // GL fills entire preview bounds.
@@ -508,23 +645,23 @@ export default function MagicCanvasMode({
           />
         )}
 
+        {/* "Generation paused" banner — shown when user returns after leaving mid-build */}
+        {pausedMsg && (
+          <TouchableOpacity
+            style={styles.pausedBanner}
+            onPress={() => setPausedMsg(false)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.pausedBannerTxt}>
+              {'Generation paused.\nTap Generate 3D\nto resume  \u00d7'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* SVG polygon overlay — uses canvas coords (same space as taps) */}
         <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-          {/* Grid lines — only visible when snap-to-grid is ON */}
-          {gridOn && (() => {
-            const lines: React.ReactElement[] = [];
-            const cols = Math.ceil(canvasW / GRID_SIZE);
-            const rows = Math.ceil(canvasH / GRID_SIZE);
-            for (let c = 1; c < cols; c++) {
-              lines.push(<Line key={`gv${c}`} x1={c * GRID_SIZE} y1={0} x2={c * GRID_SIZE} y2={canvasH}
-                stroke="rgba(0,212,255,0.12)" strokeWidth="0.5" />);
-            }
-            for (let r = 1; r < rows; r++) {
-              lines.push(<Line key={`gh${r}`} x1={0} y1={r * GRID_SIZE} x2={canvasW} y2={r * GRID_SIZE}
-                stroke="rgba(0,212,255,0.12)" strokeWidth="0.5" />);
-            }
-            return lines;
-          })()}
+          {/* Grid lines — memoized; only re-generated when grid toggled or canvas resizes */}
+          {svgGridLines}
           {points.length >= 2 && (
             <Polyline points={polyStr} fill="none" stroke="#00d4ff"
               strokeWidth="2" strokeDasharray="6,4" />
@@ -562,8 +699,9 @@ export default function MagicCanvasMode({
           </TouchableOpacity>
         </View>
 
-        {/* Bottom bar */}
-        <View style={styles.drawBottom} pointerEvents="box-none">
+        {/* Bottom area: hint/generate bar (measurements now live in the parent footer) */}
+        <View style={styles.drawBottomArea} pointerEvents="box-none">
+          <View style={styles.drawBottom}>
           <Text style={styles.drawHint} numberOfLines={1}>
             {closed
               ? `✓ ${points.length} pts · ready`
@@ -576,6 +714,7 @@ export default function MagicCanvasMode({
               <Text style={styles.genBtnText}>Generate 3D ▶</Text>
             </TouchableOpacity>
           )}
+          </View>
         </View>
       </View>
     );
@@ -656,9 +795,14 @@ export default function MagicCanvasMode({
               manualElevationDir={manualElevationDir}
               manualMoveYDir={manualMoveYDir}
               gesturesDisabled={gesturesDisabled}
+              explodeEnabled={explodeEnabled}
+              explodeSeparation={explodeSeparation}
+              selectedFloor={explodeSelectedFloor}
+              onFloorGroupsReady={onFloorGroupsReady}
             />
           ) : (
             <Building3DOverlay
+              key={resolvedModelUrl ?? '__no_model__'}
               config={derivedConfig}
               modelUri={resolvedModelUrl}
               constrainToFootprint
@@ -677,6 +821,25 @@ export default function MagicCanvasMode({
         </View>
       </ViewShot>
 
+      {/* DEV: metric overlay — set DEV_SHOW_METRICS=true in gridConfig.ts to enable */}
+      {DEV_SHOW_METRICS && (
+        <View pointerEvents="none" style={{
+          position: 'absolute', top: 8, left: 8,
+          backgroundColor: 'rgba(0,0,0,0.70)',
+          borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6,
+          borderWidth: 1, borderColor: 'rgba(0,212,255,0.4)',
+        }}>
+          <Text style={{ color: '#00d4ff', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' }}>
+            {`Footprint: ${footprintMeasurements.widthM.toFixed(1)}m × ${footprintMeasurements.depthM.toFixed(1)}m`}
+          </Text>
+          <Text style={{ color: '#00d4ff', fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' }}>
+            {`Height: ${floorCount} × ${config3d.floorHeightM}m = ${(floorCount * config3d.floorHeightM).toFixed(1)}m`}
+          </Text>
+          <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace' }}>
+            {`Mode: ${magicMode}`}
+          </Text>
+        </View>
+      )}
 
       {showBuildToolbar && (
         <View style={styles.buildToolbar} pointerEvents="box-none">
@@ -772,6 +935,35 @@ export default function MagicCanvasMode({
           <Text style={styles.controlBtnText}>{'\u27F3'}</Text>
         </TouchableOpacity>
       </View>}
+
+      {/* ── Floor Tour bar ── shown in build3d when a unit is linked ── */}
+      {!!unitId && phase === 'build3d' && (
+        <View style={styles.tourBar}>
+          <FloorPicker value={tourFloor} count={floorsFromTours} onChange={setTourFloor} compact />
+          <View style={styles.tourCta}>
+            {tourUrl ? (
+              <TouchableOpacity
+                style={styles.tourBtn}
+                onPress={() => setTourModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.tourBtnTxt}>▶ Tour</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.tourNone}>No tour</Text>
+            )}
+          </View>
+        </View>
+      )}
+
+      <FloorTourModal
+        visible={tourModalVisible}
+        floorsTotal={floorsFromTours}
+        initialFloorIndex={tourFloor}
+        getTourUrlForFloor={(fl) => getTourUrlFromArr(normFloors, fl)}
+        onFloorChange={setTourFloor}
+        onClose={() => setTourModalVisible(false)}
+      />
     </View>
   );
 }
@@ -835,8 +1027,10 @@ const styles = StyleSheet.create({
   toolBtnTextDisabled: { color: 'rgba(221,238,255,0.35)' },
 
   // ── Bottom bar (draw) ─────────────────────────────────────────────────────
-  drawBottom: {
+  drawBottomArea: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
+  },
+  drawBottom: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 12, paddingVertical: 8,
     backgroundColor: 'rgba(0,0,0,0.55)', gap: 8,
@@ -923,6 +1117,111 @@ const styles = StyleSheet.create({
   },
   circleDown: {
     transform: [{ rotate: '90deg' }],
+  },
+
+  // ── Measurement strip (inline, full-width, above generate/play button) ──────
+  measureStrip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,212,255,0.30)',
+    paddingVertical: 5,
+    paddingHorizontal: 4,
+  },
+  measureCell: {
+    flex: 1,
+    alignItems: 'center' as const,
+  },
+  measureDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(0,212,255,0.25)',
+  },
+  measureLabel: {
+    color: 'rgba(0,212,255,0.82)',
+    fontSize: 8,
+    fontWeight: '700' as const,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+  },
+  measureValue: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 0.2,
+    marginTop: 1,
+  },
+  // kept as hidden no-ops so any lingering JSX refs don't crash
+  measureOverlay: { position: 'absolute' as const, bottom: -9999, left: 0, opacity: 0 },
+  measureOverlayFrozen: { position: 'absolute' as const, bottom: -9999, left: 0, opacity: 0 },
+
+  // ── "Generation paused" banner (draw phase, after tab-switch) ──────────────────
+  pausedBanner: {
+    position: 'absolute' as const,
+    top: 8,
+    right: 8,
+    maxWidth: 160,
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  pausedBannerTxt: {
+    color: 'rgba(0,212,255,0.9)',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 0.3,
+    lineHeight: 15,
+    textAlign: 'right' as const,
+  },
+
+  // ── Floor Tour bar ───────────────────────────────────────────────────────
+  tourBar: {
+    position: 'absolute' as const,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,212,255,0.2)',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    gap: 8,
+  },
+  tourChips: { flexDirection: 'row' as const, gap: 6, paddingRight: 8 },
+  tourChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  tourChipActive: { borderColor: '#00d4ff', backgroundColor: 'rgba(0,212,255,0.15)' },
+  tourChipTxt: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+  tourChipTxtActive: { color: '#00d4ff' },
+  tourCta: { minWidth: 68, alignItems: 'center' as const },
+  tourBtn: {
+    backgroundColor: '#00d4ff',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  tourBtnTxt: { color: '#000', fontWeight: '800' as const, fontSize: 11 },
+  tourNone: {
+    color: 'rgba(255,255,255,0.32)',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
   },
 });
 

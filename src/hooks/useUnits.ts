@@ -122,11 +122,11 @@ export function useUnits() {
     fetchUnits();
   }, [fetchUnits]);
 
-  const createUnit = async (input: UnitInsert): Promise<Unit | null> => {
+  const createUnit = async (input: UnitInsert): Promise<{ unit: Unit | null; error: string | null }> => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user) return { unit: null, error: 'Not authenticated.' };
 
     const { data, error } = await supabase
       .from('units')
@@ -135,21 +135,47 @@ export function useUnits() {
       .single();
 
     if (error) {
+      // Graceful fallback: if floors column doesn't exist yet, retry without it
+      if (input.floors != null && error.message.includes('floors')) {
+        const { floors: _f, ...inputWithoutFloors } = input;
+        const { data: data2, error: error2 } = await supabase
+          .from('units')
+          .insert({ ...inputWithoutFloors, user_id: user.id })
+          .select()
+          .single();
+        if (!error2) {
+          setUnits((prev) => [data2 as Unit, ...prev]);
+          return { unit: data2 as Unit, error: null };
+        }
+        setError(error2.message);
+        return { unit: null, error: error2.message };
+      }
       setError(error.message);
-      return null;
+      return { unit: null, error: error.message };
     }
     setUnits((prev) => [data as Unit, ...prev]);
-    return data as Unit;
+    return { unit: data as Unit, error: null };
   };
 
-  const updateUnit = async (id: string, updates: UnitUpdate): Promise<boolean> => {
+  const updateUnit = async (id: string, updates: UnitUpdate): Promise<{ ok: boolean; error: string | null }> => {
     const { error } = await supabase.from('units').update(updates).eq('id', id);
     if (error) {
+      // Graceful fallback: if floors column doesn't exist yet, retry without it
+      if (updates.floors != null && error.message.includes('floors')) {
+        const { floors: _f, ...updatesWithoutFloors } = updates;
+        const { error: error2 } = await supabase.from('units').update(updatesWithoutFloors).eq('id', id);
+        if (!error2) {
+          setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...updatesWithoutFloors } : u)));
+          return { ok: true, error: null };
+        }
+        setError(error2.message);
+        return { ok: false, error: error2.message };
+      }
       setError(error.message);
-      return false;
+      return { ok: false, error: error.message };
     }
     setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...updates } : u)));
-    return true;
+    return { ok: true, error: null };
   };
 
   const deleteUnit = async (id: string): Promise<boolean> => {
@@ -479,4 +505,92 @@ export function useUnitGlbModels(unitId: string) {
   );
 
   return { byType, loading, error, fetchGlbModels, upsertGlbModel, deleteGlbModel };
+}
+
+// (unit_floor_tours removed — floor data now stored in units.floors JSONB column)
+
+// Dead export kept as tombstone to avoid import errors elsewhere:
+export type FloorTour = {
+  id: string;
+  unit_id: string;
+  floor_index: number;
+  provider: string;
+  url: string;
+  created_at: string;
+};
+
+/** Standalone helper used by the Create screen (unit_id not known until after insert). */
+export async function saveFloorToursForUnit(
+  unitId: string,
+  urlMap: Record<number, string>,
+): Promise<void> {
+  const toUpsert = Object.entries(urlMap)
+    .filter(([, url]) => url.trim().length > 0)
+    .map(([fi, url]) => ({
+      unit_id: unitId,
+      floor_index: Number(fi),
+      provider: 'matterport',
+      url: url.trim(),
+    }));
+  if (toUpsert.length > 0) {
+    await supabase
+      .from('unit_floor_tours')
+      .upsert(toUpsert, { onConflict: 'unit_id,floor_index' });
+  }
+  // Bust module-level cache so all useUnitFloorTours consumers re-fetch.
+  invalidateTourCache(unitId);
+}
+
+/** Hook for the Edit screen — loads tours and provides a save function. */
+export function useFloorTours(unitId: string) {
+  const [tours, setTours] = useState<FloorTour[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchTours = useCallback(async () => {
+    if (!unitId) { setLoading(false); return; }
+    setLoading(true);
+    const { data } = await supabase
+      .from('unit_floor_tours')
+      .select('*')
+      .eq('unit_id', unitId)
+      .order('floor_index', { ascending: true });
+    setTours((data as FloorTour[]) ?? []);
+    setLoading(false);
+  }, [unitId]);
+
+  useEffect(() => { fetchTours(); }, [fetchTours]);
+
+  const saveTours = useCallback(async (urlMap: Record<number, string>): Promise<void> => {
+    if (!unitId) return;
+    const entries = Object.entries(urlMap).map(([fi, url]) => ({
+      floor_index: Number(fi),
+      url: url.trim(),
+    }));
+    const toUpsert = entries
+      .filter(e => e.url.length > 0)
+      .map(e => ({
+        unit_id: unitId,
+        floor_index: e.floor_index,
+        provider: 'matterport',
+        url: e.url,
+      }));
+    const toDelete = entries.filter(e => e.url.length === 0).map(e => e.floor_index);
+    if (toUpsert.length > 0) {
+      await supabase
+        .from('unit_floor_tours')
+        .upsert(toUpsert, { onConflict: 'unit_id,floor_index' });
+    }
+    if (toDelete.length > 0) {
+      await supabase
+        .from('unit_floor_tours')
+        .delete()
+        .eq('unit_id', unitId)
+        .in('floor_index', toDelete);
+    }
+    // Bust module-level cache so all useUnitFloorTours consumers re-fetch.
+    invalidateTourCache(unitId);
+    await fetchTours();
+  }, [unitId, fetchTours]);
+
+  return { tours, loading, saveTours, refetch: fetchTours };
 }

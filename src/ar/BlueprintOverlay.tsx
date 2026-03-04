@@ -265,24 +265,6 @@ export const BlueprintOverlay: React.FC<BlueprintOverlayProps> = ({
         ))}
 
         <AnimatedPath
-          d={outerPath}
-          stroke={STROKE_COLOR}
-          strokeWidth={STROKE_WIDTH * 1.5}
-          strokeDasharray={perimeterLen}
-          fill="rgba(0,212,255,0.04)"
-          animatedProps={outerProps}
-        />
-
-        <AnimatedPath
-          d={innerPath}
-          stroke={STROKE_COLOR}
-          strokeWidth={STROKE_WIDTH}
-          strokeDasharray={perimeterLen * 0.8}
-          fill="none"
-          animatedProps={innerProps}
-        />
-
-        <AnimatedPath
           d={diagPath}
           stroke={`${STROKE_COLOR}66`}
           strokeWidth={0.8}
@@ -290,21 +272,6 @@ export const BlueprintOverlay: React.FC<BlueprintOverlayProps> = ({
           fill="none"
           animatedProps={diagProps}
         />
-
-        <AnimatedG animatedProps={cornerProps}>
-          {corners.map(([x, y], idx) => (
-            <AnimatedRect
-              key={idx}
-              x={x}
-              y={y}
-              width={12}
-              height={12}
-              stroke={STROKE_COLOR}
-              strokeWidth={1.5}
-              fill="none"
-            />
-          ))}
-        </AnimatedG>
 
         <Line x1={cx - 10} y1={cy} x2={cx + 10} y2={cy} stroke={`${STROKE_COLOR}88`} strokeWidth={1} />
         <Line x1={cx} y1={cy - 10} x2={cx} y2={cy + 10} stroke={`${STROKE_COLOR}88`} strokeWidth={1} />

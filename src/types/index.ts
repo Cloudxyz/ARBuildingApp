@@ -51,6 +51,8 @@ export interface Unit {
   price: number | null;
   status: UnitStatus;
   thumbnail_url: string | null;
+  /** Matterport URLs per floor. floors[i] = URL for floor (i+1), "" if no tour. Length = floor count. */
+  floors: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +73,8 @@ export interface UnitInsert {
   status?: UnitStatus;
   thumbnail_url?: string | null;
   development_id?: string | null;
+  /** Matterport URLs per floor. floors[i] = URL for floor (i+1), "" if no tour. Length = floor count. */
+  floors?: string[] | null;
 }
 
 export type UnitUpdate = Partial<UnitInsert>;

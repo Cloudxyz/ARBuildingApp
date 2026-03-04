@@ -8,10 +8,11 @@ import {
 } from 'react-native';
 import AnimatedPressable from '../../../src/components/AnimatedPressable';
 import ScreenLoader from '../../../src/components/ScreenLoader';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import { useDialog } from '../../../src/lib/dialog';
 import { useUnitGlbModels, useUnitModel, useUnits } from '../../../src/hooks/useUnits';
+import { normalizeFloors, getFloorsTotalFromArr } from '../../../src/lib/floors';
 import { UnitType, resolveGlbSource } from '../../../src/types';
 
 const ACCENT = '#00d4ff';
@@ -33,11 +34,18 @@ export default function UnitDetailScreen() {
   const { id, name: paramName } = useLocalSearchParams<{ id: string; name?: string }>();
   const router = useRouter();
   const dialog = useDialog();
-  const { units, loading: unitsLoading, error: unitsError, deleteUnit } = useUnits();
+  const { units, loading: unitsLoading, error: unitsError, deleteUnit, fetchUnits } = useUnits();
   const { model, loading: modelLoading } = useUnitModel(id);
 
   const unit = units.find((u) => u.id === id);
   const { byType: glbByType } = useUnitGlbModels(id);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnits();
+    }, [fetchUnits]),
+  );
+
 
   const handleDelete = useCallback(async () => {
     const ok = await dialog.confirm({
@@ -110,6 +118,7 @@ export default function UnitDetailScreen() {
           <InfoRow label="Name" value={unit.name} />
           <InfoRow label="Unit Type" value={unit.unit_type?.toUpperCase()} />
           <InfoRow label="Area" value={unit.area_sqm ? `${unit.area_sqm.toLocaleString()} m2` : null} />
+          <InfoRow label="Floors" value={getFloorsTotalFromArr(normalizeFloors(unit.floors))} />
           {/* Per-type GLB model indicators */}
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>3D Models</Text>

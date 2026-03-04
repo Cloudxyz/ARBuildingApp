@@ -17,6 +17,11 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
@@ -28,6 +33,7 @@ import { useAuth } from '../../../src/hooks/useAuth';
 import { useDialog } from '../../../src/lib/dialog';
 import { supabase } from '../../../src/lib/supabase';
 import { Development, Unit } from '../../../src/types';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d4ff';
@@ -37,6 +43,7 @@ const BORDER  = '#1a1a3a';
 const GREEN   = '#00ff88';
 const YELLOW  = '#ffe044';
 const RED     = '#ff4444';
+const PLACEHOLDER = '#b8c1df';
 
 type AdminTab = 'users' | 'developments' | 'units';
 
@@ -164,6 +171,73 @@ export default function AdminScreen() {
 
   const [tab, setTab] = useState<AdminTab>('users');
 
+  // ─ Create User modal state ────────────────────────────────────────────────
+  const [createVisible, setCreateVisible] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createEmail, setCreateEmail]     = useState('');
+  const [createName, setCreateName]       = useState('');
+  const [createRole, setCreateRole]       = useState<AppRole>('user');
+  const [createMode, setCreateMode]       = useState<'invite' | 'temp_password'>('invite');
+  const [createPass, setCreatePass]       = useState('');
+
+  const openCreateModal = () => {
+    setCreateEmail(''); setCreateName(''); setCreateRole('user');
+    setCreateMode('invite'); setCreatePass('');
+    setCreateVisible(true);
+  };
+
+  const handleCreateUser = useCallback(async () => {
+    const email = createEmail.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await dialog.alert({ title: 'Validation', message: 'Enter a valid email address.' });
+      return;
+    }
+    if (createMode === 'temp_password' && createPass.trim().length < 8) {
+      await dialog.alert({ title: 'Validation', message: 'Password must be at least 8 characters.' });
+      return;
+    }
+    setCreateLoading(true);
+
+    // Explicitly get the session token so the Edge Function always receives it.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) {
+      setCreateLoading(false);
+      await dialog.alert({ title: 'Auth Error', message: 'No active session. Please sign in again.' });
+      return;
+    }
+
+    const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-create-user', {
+      body: {
+        email,
+        full_name:     createName.trim() || undefined,
+        role:          createRole,
+        mode:          createMode,
+        temp_password: createMode === 'temp_password' ? createPass.trim() : undefined,
+      },
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    setCreateLoading(false);
+
+    if (fnError) {
+      let message = fnError.message;
+      if (fnError instanceof FunctionsHttpError) {
+        try { const body = await fnError.context.json(); message = body?.error ?? message; } catch {}
+      }
+      console.error('[admin-create-user] error:', message);
+      await dialog.alert({ title: 'Error', message });
+      return;
+    }
+    setCreateVisible(false);
+    await dialog.alert({
+      title: 'Success',
+      message: createMode === 'invite'
+        ? `Invite sent to ${email}.`
+        : `User ${email} created with temporary password.`,
+    });
+    fetchUsers();
+  }, [createEmail, createName, createRole, createMode, createPass, dialog, fetchUsers]);
+
   // ─ Users data ─────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
@@ -277,10 +351,25 @@ export default function AdminScreen() {
       destructive: true,
     });
     if (!ok) return;
-    const { error } = await supabase.functions.invoke('admin-delete-user', {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) {
+      await dialog.alert({ title: 'Auth Error', message: 'No active session. Please sign in again.' });
+      return;
+    }
+    const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-delete-user', {
       body: { userId: user.id },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
+    if (fnError) {
+      let message = fnError.message;
+      if (fnError instanceof FunctionsHttpError) {
+        try { const body = await fnError.context.json(); message = body?.error ?? message; } catch {}
+      }
+      console.error('[admin-delete-user] error:', message);
+      await dialog.alert({ title: 'Error', message });
+      return;
+    }
     fetchUsers();
   }, [fetchUsers, dialog]);
 
@@ -357,7 +446,14 @@ export default function AdminScreen() {
             data={users}
             keyExtractor={(u) => u.id}
             contentContainerStyle={[styles.list, { paddingBottom: safeBottom }]}
-            ListHeaderComponent={<SectionHeader title="ALL USERS" count={users.length} />}
+            ListHeaderComponent={
+              <>
+                <SectionHeader title="ALL USERS" count={users.length} />
+                <TouchableOpacity style={styles.createBtn} onPress={openCreateModal}>
+                  <Text style={styles.createBtnText}>+ CREATE USER</Text>
+                </TouchableOpacity>
+              </>
+            }
             refreshControl={<RefreshControl refreshing={usersLoading} onRefresh={fetchUsers} tintColor={ACCENT} />}
             ListEmptyComponent={<Text style={styles.emptyText}>No users found.</Text>}
             renderItem={({ item }) => (
@@ -395,6 +491,102 @@ export default function AdminScreen() {
           />
         )}
       </View>
+
+      {/* ── Create User Modal ─────────────────────────────────────────────── */}
+      <Modal
+        visible={createVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !createLoading && setCreateVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>CREATE USER</Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Email *"
+              placeholderTextColor={PLACEHOLDER}
+              value={createEmail}
+              onChangeText={setCreateEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Full name (optional)"
+              placeholderTextColor={PLACEHOLDER}
+              value={createName}
+              onChangeText={setCreateName}
+            />
+
+            <Text style={styles.modalLabel}>ROLE</Text>
+            <View style={styles.modalToggleRow}>
+              {(['user', 'master_admin'] as AppRole[]).map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.modalToggleBtn, createRole === r && styles.modalToggleBtnActive]}
+                  onPress={() => setCreateRole(r)}
+                >
+                  <Text style={[styles.modalToggleBtnText, createRole === r && styles.modalToggleBtnTextActive]}>
+                    {r === 'master_admin' ? 'MASTER ADMIN' : 'USER'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.modalLabel}>METHOD</Text>
+            <View style={styles.modalToggleRow}>
+              {(['invite', 'temp_password'] as const).map((m) => (
+                <TouchableOpacity
+                  key={m}
+                  style={[styles.modalToggleBtn, createMode === m && styles.modalToggleBtnActive]}
+                  onPress={() => setCreateMode(m)}
+                >
+                  <Text style={[styles.modalToggleBtnText, createMode === m && styles.modalToggleBtnTextActive]}>
+                    {m === 'invite' ? 'SEND INVITE' : 'SET PASSWORD'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {createMode === 'temp_password' && (
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Temporary password (min 8 chars)"
+                placeholderTextColor={PLACEHOLDER}
+                value={createPass}
+                onChangeText={setCreatePass}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                onPress={() => setCreateVisible(false)}
+                disabled={createLoading}
+              >
+                <Text style={styles.modalBtnText}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnConfirm]}
+                onPress={handleCreateUser}
+                disabled={createLoading}
+              >
+                {createLoading
+                  ? <ActivityIndicator color={BG} size="small" />
+                  : <Text style={[styles.modalBtnText, { color: BG }]}>CREATE</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </>
   );
 }
@@ -458,4 +650,77 @@ const styles = StyleSheet.create({
   actionBtnDanger: { borderColor: '#ff2f4530', backgroundColor: 'rgba(255,47,69,0.08)' },
   actionBtnDisabled: { opacity: 0.3 },
   actionBtnText:   { color: 'rgba(255,255,255,0.65)', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1, fontWeight: '700' },
+
+  // ─ Create User button ────────────────────────────────────────────────────────
+  createBtn: {
+    borderWidth: 1,
+    borderColor: ACCENT,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: 'rgba(0,212,255,0.08)',
+  },
+  createBtnText: { color: ACCENT, fontSize: 11, fontFamily: 'monospace', letterSpacing: 1.5, fontWeight: '700' },
+
+  // ─ Modal ────────────────────────────────────────────────────────────────────
+  modalOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: CARD_BG,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 24,
+    gap: 12,
+  },
+  modalTitle: {
+    color: '#eeeeff',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    letterSpacing: 2,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  modalLabel: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 9,
+    fontFamily: 'monospace',
+    letterSpacing: 1.5,
+    marginBottom: -4,
+  },
+  modalInput: {
+    backgroundColor: '#0a0a1a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#ffffff',
+    fontSize: 14,
+  },
+  modalToggleRow:    { flexDirection: 'row', gap: 8 },
+  modalToggleBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#0a0a1a',
+  },
+  modalToggleBtnActive:    { borderColor: ACCENT, backgroundColor: 'rgba(0,212,255,0.12)' },
+  modalToggleBtnText:      { color: 'rgba(255,255,255,0.5)', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1 },
+  modalToggleBtnTextActive:{ color: ACCENT },
+  modalActions:  { flexDirection: 'row', gap: 10, marginTop: 4 },
+  modalBtn: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  modalBtnCancel:  { borderColor: BORDER, backgroundColor: 'rgba(255,255,255,0.04)' },
+  modalBtnConfirm: { borderColor: ACCENT, backgroundColor: ACCENT },
+  modalBtnText:    { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontFamily: 'monospace', letterSpacing: 1, fontWeight: '700' },
 });

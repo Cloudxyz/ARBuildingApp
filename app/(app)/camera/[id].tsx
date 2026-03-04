@@ -58,8 +58,12 @@ import { Building3DOverlay } from '../../../src/ar/Building3DOverlay';
 import MagicCanvasMode, {
   type MagicBuildPanelState,
 } from '../../../src/magic/MagicCanvasMode';
+import { type BuildingMeasurements } from '../../../src/magic/gridConfig';
 import { useARBuildingModel } from '../../../src/ar/useARBuildingModel';
 import { ARViewMode, UnitType, resolveGlbSource } from '../../../src/types';
+import { TourModal } from '../../../src/tours/TourModal';
+import { FloorPicker } from '../../../src/tours/FloorPicker';
+import { normalizeFloors, getFloorsTotalFromArr, getTourUrlFromArr } from '../../../src/lib/floors';
 
 // -- Constants ----------------------------------------------------------------
 const ACCENT     = '#00d4ff';
@@ -170,6 +174,7 @@ export default function UnitARPreviewScreen() {
     phase: 'pick', isPlaying: false, floorCount: 5,
     zoomValue: 1, canZoomIn: true, canZoomOut: true,
     magicMode: 'generate', selectedModelType: 'house', resolvedModelUrl: null,
+    displayMeasurements: null,
   });
   const [magicMode, setMagicMode] = useState<'generate' | 'model'>('generate');
   const [magicSelectedType, setMagicSelectedType] = useState<'house' | 'building' | 'commercial'>('house');
@@ -194,6 +199,21 @@ export default function UnitARPreviewScreen() {
   }, [scrollBounceY]);
   const magicZoomHoldTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const magicZoomHoldStartedRef = useRef(false);
+
+  // -- Explode View state (Magic generate mode only) --------------------------
+  const [magicExplodeEnabled, setMagicExplodeEnabled] = useState(false);
+  const [magicExplodeSep,     setMagicExplodeSep]     = useState(0);        // metres
+  const [magicExplodeFloor,   setMagicExplodeFloor]   = useState<number | 'all'>('all');
+
+  // -- Floor Tour state (Blueprint + 3D View) ----------------------------------
+  const unitFloors = normalizeFloors(unit?.floors);
+  const floorsTotal = getFloorsTotalFromArr(unitFloors);
+  const [view3dTourFloor,   setView3dTourFloor]   = useState(1);
+  const [view3dTourVisible, setView3dTourVisible] = useState(false);
+  const view3dTourUrl = getTourUrlFromArr(unitFloors, view3dTourFloor);
+  const [bpTourFloor,       setBpTourFloor]       = useState(1);
+  const [bpTourVisible,     setBpTourVisible]     = useState(false);
+  const bpTourUrl = getTourUrlFromArr(unitFloors, bpTourFloor);
 
   // -- Gesture layer (blueprint + 3d) ----------------------------------------
   const gestureScale    = useSharedValue(1);
@@ -432,6 +452,16 @@ export default function UnitARPreviewScreen() {
     else if (magicZoomHoldDir === -1 && !magicBuildState.canZoomOut) setMagicZoomHoldDir(0);
   }, [magicZoomHoldDir, magicBuildState.canZoomIn, magicBuildState.canZoomOut]);
 
+  // -- Sync floorCount from floors data once unit is loaded ------------------
+  const floorSyncDoneRef = useRef(false);
+  useEffect(() => {
+    if (floorSyncDoneRef.current || !unit) return;
+    if (floorsTotal > 1) {
+      updateConfig('floorCount', floorsTotal);
+    }
+    floorSyncDoneRef.current = true;
+  }, [unit, floorsTotal, updateConfig]);
+
   // -- Cleanup timers ---------------------------------------------------------
   useEffect(() => () => {
     [
@@ -439,6 +469,19 @@ export default function UnitARPreviewScreen() {
       blueprintCompleteTimerRef, view3dCompleteTimerRef,
     ].forEach((r) => { if (r.current) clearTimeout(r.current); });
   }, []);
+
+  // -- Explode: reset floor selection when floor count changes ---------------
+  useEffect(() => {
+    if (typeof magicExplodeFloor === 'number' && magicExplodeFloor >= magicBuildState.floorCount) {
+      setMagicExplodeFloor('all');
+    }
+  }, [magicBuildState.floorCount, magicExplodeFloor]);
+
+  // Clamp tour floor selections when config floor count changes
+  useEffect(() => {
+    setView3dTourFloor((f) => Math.min(f, Math.max(1, config.floorCount)));
+    setBpTourFloor((f) => Math.min(f, Math.max(1, config.floorCount)));
+  }, [config.floorCount]);
 
   // -- Derived play state -----------------------------------------------------
   const panelIsPlaying = viewMode === '3d'
@@ -513,6 +556,11 @@ export default function UnitARPreviewScreen() {
               selectedModelType={magicSelectedType}
               onMagicModeChange={setMagicMode}
               onModelTypeChange={setMagicSelectedType}
+              explodeEnabled={magicExplodeEnabled}
+              explodeSeparation={magicExplodeSep}
+              explodeSelectedFloor={magicExplodeFloor}
+              unitId={id ?? ''}
+              floors={unitFloors}
             />
           </View>
 
@@ -622,6 +670,26 @@ export default function UnitARPreviewScreen() {
             );
           }}
         >
+
+          {/* Measurement strip — draw & build3d phases, above Play */}
+          {isMagicMode && magicBuildState.displayMeasurements && (
+            <View style={styles.measureStrip}>
+              <View style={styles.measureCell}>
+                <Text style={styles.measureLabel}>Width</Text>
+                <Text style={styles.measureValue}>{magicBuildState.displayMeasurements.widthLabel}</Text>
+              </View>
+              <View style={styles.measureDivider} />
+              <View style={styles.measureCell}>
+                <Text style={styles.measureLabel}>Depth</Text>
+                <Text style={styles.measureValue}>{magicBuildState.displayMeasurements.depthLabel}</Text>
+              </View>
+              <View style={styles.measureDivider} />
+              <View style={styles.measureCell}>
+                <Text style={styles.measureLabel}>Height</Text>
+                <Text style={styles.measureValue}>{magicBuildState.displayMeasurements.heightLabel}</Text>
+              </View>
+            </View>
+          )}
 
           {/* Play / Stop + Save */}
           <View style={styles.row}>
@@ -739,6 +807,127 @@ export default function UnitARPreviewScreen() {
               }
             />
           </ControlRow>
+
+          {/* Virtual Tours — 3D View */}
+          {viewMode === '3d' && (
+            <>
+              <ControlRow label="TOUR">
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <FloorPicker
+                    value={view3dTourFloor}
+                    count={floorsTotal}
+                    onChange={setView3dTourFloor}
+                  />
+                  <TouchableOpacity
+                    style={[styles.saveBtn, !view3dTourUrl && styles.btnDisabled]}
+                    onPress={() => { if (view3dTourUrl) setView3dTourVisible(true); }}
+                    disabled={!view3dTourUrl}
+                  >
+                    <Text style={styles.saveBtnText}>{view3dTourUrl ? '▶ TOUR' : 'NO TOUR'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </ControlRow>
+              <TourModal
+                visible={view3dTourVisible}
+                floorsTotal={floorsTotal}
+                initialFloorIndex={view3dTourFloor}
+                getTourUrlForFloor={(fl) => getTourUrlFromArr(unitFloors, fl)}
+                onFloorChange={setView3dTourFloor}
+                onClose={() => setView3dTourVisible(false)}
+              />
+            </>
+          )}
+
+          {/* Virtual Tours — Blueprint */}
+          {viewMode === 'blueprint' && (
+            <>
+              <ControlRow label="TOUR">
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <FloorPicker
+                    value={bpTourFloor}
+                    count={floorsTotal}
+                    onChange={setBpTourFloor}
+                  />
+                  <TouchableOpacity
+                    style={[styles.saveBtn, !bpTourUrl && styles.btnDisabled]}
+                    onPress={() => { if (bpTourUrl) setBpTourVisible(true); }}
+                    disabled={!bpTourUrl}
+                  >
+                    <Text style={styles.saveBtnText}>{bpTourUrl ? '▶ TOUR' : 'NO TOUR'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </ControlRow>
+              <TourModal
+                visible={bpTourVisible}
+                floorsTotal={floorsTotal}
+                initialFloorIndex={bpTourFloor}
+                getTourUrlForFloor={(fl) => getTourUrlFromArr(unitFloors, fl)}
+                onFloorChange={setBpTourFloor}
+                onClose={() => setBpTourVisible(false)}
+              />
+            </>
+          )}
+
+          {/* EXPLODE VIEW — Magic generate build3d only */}
+          {isMagicMode && magicBuildState.phase === 'build3d' && magicMode === 'generate' && (
+            <>
+              <ControlRow label="EXPLODE">
+                <TouchableOpacity
+                  style={[styles.explodeToggle, magicExplodeEnabled && styles.explodeToggleOn]}
+                  onPress={() => {
+                    const next = !magicExplodeEnabled;
+                    setMagicExplodeEnabled(next);
+                    if (!next) {
+                      // Reset floor selection when collapsing
+                      setMagicExplodeFloor('all');
+                    }
+                  }}
+                >
+                  <Text style={[styles.explodeToggleText, magicExplodeEnabled && styles.explodeToggleTextOn]}>
+                    {magicExplodeEnabled ? 'ON' : 'OFF'}
+                  </Text>
+                </TouchableOpacity>
+              </ControlRow>
+
+              {magicExplodeEnabled && (
+                <>
+                  <ControlRow label="SEPARATION">
+                    <Stepper
+                      value={`${magicExplodeSep.toFixed(2)}m`}
+                      onDec={() => setMagicExplodeSep((v) => Math.max(0, +(v - 0.25).toFixed(2)))}
+                      onInc={() => setMagicExplodeSep((v) => Math.min(3, +(v + 0.25).toFixed(2)))}
+                    />
+                  </ControlRow>
+
+                  <ControlRow label="FLOOR">
+                    <View style={styles.chipRow}>
+                      {/* ALL chip */}
+                      <TouchableOpacity
+                        style={[styles.typeChip, magicExplodeFloor === 'all' && styles.typeChipActive]}
+                        onPress={() => setMagicExplodeFloor('all')}
+                      >
+                        <Text style={[styles.typeChipText, magicExplodeFloor === 'all' && { color: ACCENT }]}>
+                          ALL
+                        </Text>
+                      </TouchableOpacity>
+                      {/* Per-floor chips (1-indexed label, 0-indexed value) */}
+                      {Array.from({ length: magicBuildState.floorCount }, (_, i) => (
+                        <TouchableOpacity
+                          key={i}
+                          style={[styles.typeChip, magicExplodeFloor === i && styles.typeChipActive]}
+                          onPress={() => setMagicExplodeFloor(i)}
+                        >
+                          <Text style={[styles.typeChipText, magicExplodeFloor === i && { color: ACCENT }]}>
+                            {`FL${i + 1}`}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ControlRow>
+                </>
+              )}
+            </>
+          )}
 
           {/* Zoom (3d + magic3d only) */}
           {(viewMode === '3d' || isMagicMode) && (
@@ -943,5 +1132,41 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.45)', fontSize: 10,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
     textAlign: 'center', paddingTop: 4,
+  },
+
+  explodeToggle: {
+    paddingHorizontal: 18, paddingVertical: 7,
+    borderRadius: 4, borderWidth: 1, borderColor: BORDER,
+  },
+  explodeToggleOn: { borderColor: GREEN, backgroundColor: 'rgba(0,255,136,0.08)' },
+  explodeToggleText: {
+    color: 'rgba(255,255,255,0.55)', fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    letterSpacing: 2, fontWeight: '700',
+  },
+  explodeToggleTextOn: { color: GREEN },
+
+  measureStrip: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.18)',
+    overflow: 'hidden',
+  },
+  measureCell: {
+    flex: 1, alignItems: 'center', paddingVertical: 7,
+  },
+  measureDivider: {
+    width: 1, backgroundColor: 'rgba(0,212,255,0.18)', marginVertical: 6,
+  },
+  measureLabel: {
+    color: '#00d4ff', fontSize: 8, letterSpacing: 1.5,
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+    textTransform: 'uppercase', marginBottom: 2,
+  },
+  measureValue: {
+    color: '#eeeeff', fontSize: 11, fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
   },
 });

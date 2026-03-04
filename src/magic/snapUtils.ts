@@ -5,17 +5,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { CanvasPoint } from './types';
+import { GRID_SIZE } from './gridConfig'; // single source of truth — edit gridConfig.ts to change grid size
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 export const SNAP_CLOSE_RADIUS  = 22;  // px — auto-close to first point
 export const AXIS_SNAP_RATIO    = 0.28; // if dy/dx < ratio -> snap to horizontal
 export const CORNER_SNAP_RADIUS = 30;  // px — how close to 90° projection to snap
-// Grid size tunables — only affects 3D Magic view (PhotoCanvasWithPolygon).
-// Increase GRID_CELL_SIZE for larger squares (easier point placement).
-// GRID_SCALE is a developer multiplier: 1 = normal, 2 = double-sized cells.
-export const GRID_CELL_SIZE     = 40;  // px — base grid cell size
-export const GRID_SCALE         = 1;   // developer multiplier (1 = normal)
-export const GRID_SIZE          = GRID_CELL_SIZE * GRID_SCALE; // effective snap cell size
+// GRID_SIZE is imported from gridConfig.ts — do not redeclare it here.
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function dist(a: CanvasPoint, b: CanvasPoint): number {

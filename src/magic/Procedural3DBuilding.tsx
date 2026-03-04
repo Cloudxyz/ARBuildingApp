@@ -25,6 +25,16 @@ import * as THREE from 'three';
 import { BuildingFootprintConfig } from './types';
 import { polygonToFootprint } from './PolygonToFootprint';
 import { loadBuildingTextures, BuildingTextures } from './buildingTextures';
+import {
+  type FloorGroupData,
+  type ExplodeTween,
+  buildExplodeTweens,
+  tickExplodeTweens,
+  applyFloorSelection,
+  cleanupFloorManager,
+} from '../ar/FloorManager';
+import { CinematicCameraController } from '../ar/CinematicCameraController';
+import { screenToNDC, castRay, intersectGroundPlane } from '../ar/TouchRaycaster';
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 const FLOOR_BUILD_SEC  = 0.8 / 4;   // match 3D View effective speed (default buildSpeed=4)
@@ -165,6 +175,16 @@ interface Procedural3DBuildingProps {
   manualMoveYDir?: -1 | 0 | 1;
   /** When true, PanResponder touch gestures are disabled. */
   gesturesDisabled?: boolean;
+  /** When true, floors animate apart vertically (Exploded View). */
+  explodeEnabled?: boolean;
+  /** Vertical gap added between floors when exploded, in scene units (metres). */
+  explodeSeparation?: number;
+  /** Which floor index to highlight; others are ghosted. 'all' = no isolation. */
+  selectedFloor?: number | 'all';
+  /** Fired when user taps a floor mesh. Passes the selected floorIndex or 'all' to deselect. */
+  onFloorSelect?: (floor: number | 'all') => void;
+  /** Fired once after buildGeometry() completes with the current floor count. */
+  onFloorGroupsReady?: (count: number) => void;
 }
 
 export interface Procedural3DDebugMetrics {
@@ -344,11 +364,22 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   manualElevationDir = 0,
   manualMoveYDir = 0,
   gesturesDisabled = false,
+  explodeEnabled = false,
+  explodeSeparation = 0,
+  selectedFloor = 'all' as number | 'all',
+  onFloorGroupsReady,
+  onFloorSelect,
 }) => {
   const [glReady, setGlReady] = useState(false);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
+  /** Incremented to force GLView remount when the GL context was lost during inactivity. */
+  const [glKey, setGlKey] = useState(0);
+  /** True while GLView is remounting after a context-loss recovery (shows "Restoring 3D…"). */
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const raffRef      = useRef<number>(0);
+  /** Set true whenever a GL render error occurs; triggers remount on next focus. */
+  const contextLostRef = useRef(false);
   const cameraRef    = useRef<THREE.PerspectiveCamera | null>(null);
   const isPlayingRef = useRef(isPlaying);
   const isActiveRef  = useRef(active);
@@ -401,6 +432,36 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   const manualElevationDirRef = useRef<-1 | 0 | 1>(0);
   const manualMoveYDirRef     = useRef<-1 | 0 | 1>(0);
   const gesturesDisabledRef   = useRef(false);
+  // ── Floor Manager refs ──────────────────────────────────────────────────
+  const floorGroupsRef       = useRef<FloorGroupData[]>([]);
+  const explodeTweensRef     = useRef<ExplodeTween[]>([]);
+  const ghostMatCacheRef     = useRef<Map<string, THREE.Material>>(new Map());
+  const origMatMapRef        = useRef<Map<THREE.Mesh, THREE.Material | THREE.Material[]>>(new Map());
+  const explodeEnabledRef    = useRef(explodeEnabled);
+  const explodeSeparationRef = useRef(explodeSeparation);
+  const selectedFloorRef     = useRef<number | 'all'>(selectedFloor);
+  const onFloorGroupsReadyRef = useRef<((count: number) => void) | undefined>(onFloorGroupsReady);
+  // ── Cinematic camera refs ───────────────────────────────────────────────
+  const cinematicRef         = useRef<CinematicCameraController | null>(null);
+  const cinematicWasActiveRef = useRef(false);
+  const cinematicFiredRef    = useRef(false); // guard: fire once per build
+  const [cinematicActive, setCinematicActive] = useState(false);
+  // ── Touch interaction refs (tap / double-tap / long-press / ground move) ───────────
+  const raycasterRef      = useRef(new THREE.Raycaster());
+  const tapRef            = useRef({ t0: 0, x0: 0, y0: 0, moved: false, active: false, fingerCount: 1 });
+  const doubleTapRef      = useRef({ lastT: 0, lastX: 0, lastY: 0 });
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moveModeRef       = useRef(false);
+  const moveGrabRef       = useRef({ offsetX: 0, offsetZ: 0 });
+  const floorMeshMapRef   = useRef<Map<string, number>>(new Map());
+  const focusTweenRef     = useRef<{
+    sT:    THREE.Vector3; eT:    THREE.Vector3;
+    sDist: number;        eDist: number;
+    sEl:   number;        eEl:   number;
+    prog:  number;        dur:   number;
+  } | null>(null);
+  const onFloorSelectRef  = useRef(onFloorSelect);
+  const [showMoveHint, setShowMoveHint] = useState(false);
   const wasActiveRef      = useRef(active);
   const latestMetricsRef  = useRef<Procedural3DDebugMetrics | null>(null);
   const movedModelInGestureRef = useRef(false);
@@ -418,11 +479,68 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   useEffect(() => { manualElevationDirRef.current = manualElevationDir as (-1 | 0 | 1); }, [manualElevationDir]);
   useEffect(() => { manualMoveYDirRef.current     = manualMoveYDir     as (-1 | 0 | 1); }, [manualMoveYDir]);
   useEffect(() => { gesturesDisabledRef.current   = gesturesDisabled; }, [gesturesDisabled]);
+  useEffect(() => { explodeEnabledRef.current     = explodeEnabled; }, [explodeEnabled]);
+  useEffect(() => { explodeSeparationRef.current  = explodeSeparation; }, [explodeSeparation]);
+  useEffect(() => { selectedFloorRef.current      = selectedFloor; }, [selectedFloor]);
+  useEffect(() => { onFloorGroupsReadyRef.current = onFloorGroupsReady; }, [onFloorGroupsReady]);
+  useEffect(() => { onFloorSelectRef.current = onFloorSelect; }, [onFloorSelect]);
+
+  // Create the CinematicCameraController once (refs are stable so this is safe)
+  useEffect(() => {
+    cinematicRef.current = new CinematicCameraController({
+      azimuthRef,
+      elevationRef,
+      distRef,
+      baseDistRef,
+      cameraTargetRef,
+      buildingGroupRef,
+    });
+    return () => {
+      cinematicRef.current?.cleanup();
+      cinematicRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Trigger explode / collapse tweens when enabled state or separation changes
+  useEffect(() => {
+    const floors = floorGroupsRef.current;
+    if (!floors.length) return;
+    const sep = explodeEnabled ? explodeSeparation : 0;
+    explodeTweensRef.current = buildExplodeTweens(floors, sep, 380, performance.now());
+  }, [explodeEnabled, explodeSeparation]);
+
+  // Apply floor selection (ghosting) when selectedFloor changes
+  useEffect(() => {
+    applyFloorSelection(
+      floorGroupsRef.current,
+      selectedFloor,
+      0.22,
+      ghostMatCacheRef.current,
+      origMatMapRef.current,
+    );
+  }, [selectedFloor]);
+
+  // Cleanup FloorManager on unmount
+  useEffect(() => () => {
+    cleanupFloorManager(floorGroupsRef.current, ghostMatCacheRef.current, origMatMapRef.current);
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+  }, []);
+
   useEffect(() => {
     if (active) {
-      warmupPendingRef.current = true;
-      forceResizeRef.current   = true; // re-apply viewport after tab-focus-return
-      setIsWarmingUp(true);
+      if (contextLostRef.current) {
+        // GL context was lost while the component was inactive (common on Android).
+        // Remount the GLView to get a fresh context + full scene rebuild.
+        contextLostRef.current = false;
+        setIsRestoring(true);
+        setGlReady(false);
+        setGlKey(k => k + 1);
+      } else {
+        warmupPendingRef.current = true;
+        forceResizeRef.current   = true; // re-apply viewport after tab-focus-return
+        setIsWarmingUp(true);
+      }
     } else {
       warmupPendingRef.current = false;
       setIsWarmingUp(false);
@@ -492,7 +610,14 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     // Keep building centered in the full GL preview.
     centroidRef.current.set(0, totalH / 2, 0);
 
-    const footprint     = polygonToFootprint(npts, cfg.footprintScale * 12);
+    // Phase 2: use metric dims from the drawn polygon when available;
+    // fall back to legacy aspect-ratio squeeze if caller didn't supply them.
+    const footprint     = polygonToFootprint(
+      npts,
+      cfg.footprintScale * 12,   // legacy scaleM fallback
+      cfg.footprintWidthM,       // exact meters from pixel bbox (Phase 2+)
+      cfg.footprintDepthM,
+    );
     const buildingGroup = new THREE.Group();
     buildingGroup.position.set(0, 0, 0);
     buildingGroup.rotation.set(0, 0, 0);
@@ -500,14 +625,10 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     buildingGroupRef.current = buildingGroup;
     const adaptiveTextureRepeat = computeAdaptiveTextureRepeat(footprint.points, totalH);
 
-    // Shape + extrude
+    // Shape (shared across per-floor ExtrudeGeometry slabs below)
     const shape = new THREE.Shape();
     footprint.points.forEach((p, i) => { if (i === 0) shape.moveTo(p.x, p.z); else shape.lineTo(p.x, p.z); });
     shape.closePath();
-    const extrudeGeo = new THREE.ExtrudeGeometry(shape, { depth: totalH, bevelEnabled: false });
-    extrudeGeo.rotateX(-Math.PI / 2);
-    const uvAttr = extrudeGeo.getAttribute('uv');
-    if (uvAttr) extrudeGeo.setAttribute('uv2', uvAttr);
 
     // PBR material — reuse cached textures so rebuild is fast
     let roofMat: THREE.Material;
@@ -555,10 +676,29 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     }
     clipPlaneRef.current = clipPlane;
 
-    const buildMesh = new THREE.Mesh(extrudeGeo, [roofMat, facadeMat]);
-    buildMesh.castShadow = buildMesh.receiveShadow = true;
-    buildingGroup.add(buildMesh);
-    coreMeshRef.current = buildMesh;
+    // ── Per-floor groups (Exploded View) ───────────────────────────────────
+    // Each floor slice is an independent THREE.Group so its Y can be animated
+    // independently during explode without affecting other floors.
+    const newFloorGroups: FloorGroupData[] = [];
+    for (let f = 0; f < cfg.floorCount; f++) {
+      const fg = new THREE.Group();
+      fg.position.set(0, f * cfg.floorHeightM, 0);
+      buildingGroup.add(fg);
+
+      const slabGeo = new THREE.ExtrudeGeometry(shape, { depth: cfg.floorHeightM, bevelEnabled: false });
+      slabGeo.rotateX(-Math.PI / 2);
+      const slabUv = slabGeo.getAttribute('uv');
+      if (slabUv) slabGeo.setAttribute('uv2', slabUv);
+      // Top floor cap uses roofMat; interior caps are interior and invisible
+      const capMat = f === cfg.floorCount - 1 ? roofMat : facadeMat;
+      const slabMesh = new THREE.Mesh(slabGeo, [capMat, facadeMat]);
+      slabMesh.castShadow = slabMesh.receiveShadow = true;
+      fg.add(slabMesh);
+
+      newFloorGroups.push({ index: f, group: fg, baseY: 0, meshes: [slabMesh] });
+    }
+    // Keep coreMeshRef pointing at ground-floor slab for backward compat
+    coreMeshRef.current = (newFloorGroups[0]?.group.children[0] as THREE.Mesh) ?? null;
 
     // Floor-slab edge lines
     const edgeMat = new THREE.LineBasicMaterial({ color: 0xaaddff, clippingPlanes: [clipPlane] });
@@ -692,10 +832,12 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         const bandGeo = new THREE.BoxGeometry(Math.max(0.4, wallLen * 0.96), BAND_HEIGHT, BAND_DEPTH);
         bandGeo.rotateY(faceAngle);
         const bandMesh = new THREE.Mesh(bandGeo, f % 2 === 0 ? facadeTrimMat : facadeShadowMat);
-        bandMesh.position.set(midWX + nx * RELIEF_OUT, f * cfg.floorHeightM, midWZ + nz * RELIEF_OUT);
+        // Y=0 local to floor group f = world Y f*floorHeightM (bottom of that floor)
+        bandMesh.position.set(midWX + nx * RELIEF_OUT, 0, midWZ + nz * RELIEF_OUT);
         bandMesh.castShadow = true;
         bandMesh.receiveShadow = true;
-        buildingGroup.add(bandMesh);
+        newFloorGroups[f].group.add(bandMesh);
+        newFloorGroups[f].meshes.push(bandMesh);
       }
 
       // Vertical pilasters — break flat walls into bays.
@@ -732,7 +874,7 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
       const winH   = cfg.floorHeightM * WIN_H_FRAC;
 
       for (let f = 0; f < cfg.floorCount; f++) {
-        const centerY = (f + 0.5) * cfg.floorHeightM;   // +Y is up ✓
+        const centerY = 0.5 * cfg.floorHeightM;   // local Y within floor group (+Y is up) ✓
 
         for (let w = 0; w < numWin; w++) {
           const t  = (w + 0.5) / numWin;
@@ -748,7 +890,8 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
           frameMesh.position.set(px + nx * WIN_INSET, centerY, pz + nz * WIN_INSET);
           frameMesh.castShadow = true;
           frameMesh.receiveShadow = true;
-          buildingGroup.add(frameMesh);
+          newFloorGroups[f].group.add(frameMesh);
+          newFloorGroups[f].meshes.push(frameMesh);
 
           const cavityGeo = new THREE.BoxGeometry(winW * 0.78, winH * 0.76, WIN_DEPTH);
           cavityGeo.rotateY(faceAngle);
@@ -756,7 +899,8 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
           cavityMesh.position.set(px - nx * (WIN_INSET + WIN_DEPTH * 0.52), centerY, pz - nz * (WIN_INSET + WIN_DEPTH * 0.52));
           cavityMesh.castShadow = false;
           cavityMesh.receiveShadow = true;
-          buildingGroup.add(cavityMesh);
+          newFloorGroups[f].group.add(cavityMesh);
+          newFloorGroups[f].meshes.push(cavityMesh);
 
           const glassGeo = new THREE.PlaneGeometry(winW * 0.72, winH * 0.70);
           glassGeo.rotateY(faceAngle);
@@ -764,7 +908,8 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
           glassMesh.position.set(px + nx * (WIN_INSET + 0.04), centerY, pz + nz * (WIN_INSET + 0.04));
           glassMesh.castShadow = false;
           glassMesh.receiveShadow = false;
-          buildingGroup.add(glassMesh);
+          newFloorGroups[f].group.add(glassMesh);
+          newFloorGroups[f].meshes.push(glassMesh);
         }
       }
     }
@@ -854,6 +999,32 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
 
     // Reset animation progress so the building re-reveals
     buildTRef.current = 0;
+
+    // ── Floor Manager: record baseY for each group after all centering passes ──
+    for (const flData of newFloorGroups) {
+      flData.baseY = flData.group.position.y;
+    }
+    cleanupFloorManager(floorGroupsRef.current, ghostMatCacheRef.current, origMatMapRef.current);
+    floorGroupsRef.current = newFloorGroups;
+    // Build uuid→floorIndex map for tap raycasting (single pass, cached)
+    const meshMap = new Map<string, number>();
+    for (const fg of newFloorGroups) {
+      for (const m of fg.meshes) meshMap.set(m.uuid, fg.index);
+    }
+    floorMeshMapRef.current = meshMap;
+    onFloorGroupsReadyRef.current?.(cfg.floorCount);
+    // Re-apply current explode / selection state to newly built geometry
+    if (explodeEnabledRef.current && explodeSeparationRef.current > 0) {
+      explodeTweensRef.current = buildExplodeTweens(
+        newFloorGroups, explodeSeparationRef.current, 1, performance.now(),
+      );
+    }
+    if (selectedFloorRef.current !== 'all') {
+      applyFloorSelection(
+        newFloorGroups, selectedFloorRef.current, 0.22,
+        ghostMatCacheRef.current, origMatMapRef.current,
+      );
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetCamera = useCallback(() => {
@@ -936,7 +1107,45 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         onMoveShouldSetPanResponderCapture:  () => !gesturesDisabledRef.current,
 
         onPanResponderGrant: (evt) => {
+          // Cancel cinematic + focus tween on any interaction
+          cinematicRef.current?.onUserInteractionStart();
+          focusTweenRef.current = null;
+
           const touches = evt.nativeEvent.touches;
+
+          // ── Tap / long-press tracking (single finger only) ────────────────
+          if (touches.length === 1) {
+            const lx = evt.nativeEvent.locationX ?? touches[0].pageX;
+            const ly = evt.nativeEvent.locationY ?? touches[0].pageY;
+            tapRef.current = { t0: Date.now(), x0: lx, y0: ly, moved: false, active: true, fingerCount: 1 };
+
+            // Start long-press timer (420 ms)
+            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = setTimeout(() => {
+              if (!tapRef.current.moved && tapRef.current.active) {
+                const cam   = cameraRef.current;
+                const bg    = buildingGroupRef.current;
+                const viewW = layoutSizeRef.current.width;
+                const viewH = layoutSizeRef.current.height;
+                if (cam && bg && viewW > 0 && viewH > 0) {
+                  const ndc = screenToNDC(tapRef.current.x0, tapRef.current.y0, viewW, viewH);
+                  const hit = intersectGroundPlane(ndc, cam, bg.position.y, raycasterRef.current);
+                  if (hit) {
+                    moveGrabRef.current = { offsetX: hit.x - bg.position.x, offsetZ: hit.z - bg.position.z };
+                    moveModeRef.current = true;
+                    setShowMoveHint(true);
+                  }
+                }
+              }
+            }, 420);
+          } else {
+            // Multi-finger: cancel tap / long-press / move mode
+            tapRef.current.active = false;
+            if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+            if (moveModeRef.current) { moveModeRef.current = false; setShowMoveHint(false); }
+          }
+
+          // ── Existing pinch / orbit initialisation ─────────────────────────
           if (touches.length >= 2) {
             const dx = touches[1].pageX - touches[0].pageX;
             const dy = touches[1].pageY - touches[0].pageY;
@@ -953,7 +1162,13 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
 
         onPanResponderMove: (evt) => {
           const touches = evt.nativeEvent.touches;
+
+          // ── 2-finger: always cancel move-mode + tap tracking ─────────────
           if (touches.length >= 2) {
+            if (moveModeRef.current) { moveModeRef.current = false; setShowMoveHint(false); }
+            tapRef.current.active = false;
+            if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+
             const dx   = touches[1].pageX - touches[0].pageX;
             const dy   = touches[1].pageY - touches[0].pageY;
             const d    = Math.hypot(dx, dy);
@@ -961,13 +1176,10 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
             const midY = (touches[0].pageY + touches[1].pageY) / 2;
 
             if (pinchDistRef.current > 0 && d > 0) {
-              // In moveModel mode: disable pinch zoom. Keep camera distance fixed.
               if (interactionMode !== 'moveModel') {
                 const scale = d / pinchDistRef.current;
                 distRef.current = Math.max(3, Math.min(100, distRef.current / scale));
               }
-
-              // 2-finger pan disabled in moveModel mode.
               const dmx = midX - lastMidRef.current.x;
               const dmy = midY - lastMidRef.current.y;
               if (interactionMode !== 'moveModel') {
@@ -982,16 +1194,52 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
 
             pinchDistRef.current = d;
             lastMidRef.current   = { x: midX, y: midY };
-          } else if (touches.length === 1) {
-            // single finger:
-            // - moveModel mode: rotate only (no zoom, no drag)
-            // - camera mode: rotate/orbit
+            return;
+          }
+
+          // ── Single finger ─────────────────────────────────────────────────
+          if (touches.length === 1) {
             pinchDistRef.current = 0;
             const tx  = touches[0].pageX;
             const ty  = touches[0].pageY;
+
+            // Track movement for tap / long-press cancellation
+            if (tapRef.current.active) {
+              const lx = evt.nativeEvent.locationX ?? tx;
+              const ly = evt.nativeEvent.locationY ?? ty;
+              if (Math.hypot(lx - tapRef.current.x0, ly - tapRef.current.y0) > 8) {
+                tapRef.current.moved = true;
+                if (longPressTimerRef.current && !moveModeRef.current) {
+                  clearTimeout(longPressTimerRef.current);
+                  longPressTimerRef.current = null;
+                }
+              }
+            }
+
             const ddx = tx - lastTouchRef.current.x;
             const ddy = ty - lastTouchRef.current.y;
             lastTouchRef.current = { x: tx, y: ty };
+
+            // Ground-plane move mode: drag building on XZ plane
+            if (moveModeRef.current) {
+              const cam   = cameraRef.current;
+              const bg    = buildingGroupRef.current;
+              const viewW = layoutSizeRef.current.width;
+              const viewH = layoutSizeRef.current.height;
+              if (cam && bg && viewW > 0 && viewH > 0) {
+                const lx = evt.nativeEvent.locationX ?? tx;
+                const ly = evt.nativeEvent.locationY ?? ty;
+                const ndc = screenToNDC(lx, ly, viewW, viewH);
+                const hit = intersectGroundPlane(ndc, cam, bg.position.y, raycasterRef.current);
+                if (hit) {
+                  bg.position.x = hit.x - moveGrabRef.current.offsetX;
+                  bg.position.z = hit.z - moveGrabRef.current.offsetZ;
+                  bg.updateMatrixWorld(true);
+                }
+              }
+              return; // skip orbit
+            }
+
             if (interactionMode === 'moveModel') {
               const g = buildingGroupRef.current;
               if (g) {
@@ -1007,11 +1255,74 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
           }
         },
 
-        onPanResponderRelease: () => {
+        onPanResponderRelease: (evt) => {
+          // Clear long-press timer
+          if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+
+          // Exit move mode on release
+          if (moveModeRef.current) {
+            moveModeRef.current = false;
+            setShowMoveHint(false);
+            pinchDistRef.current = 0;
+            tapRef.current.active = false;
+            return;
+          }
+
+          // ── Tap detection ─────────────────────────────────────────────────
+          const tap      = tapRef.current;
+          const duration = Date.now() - tap.t0;
+          if (tap.active && !tap.moved && tap.fingerCount === 1 && duration < 180) {
+            const lx    = evt.nativeEvent.locationX ?? tap.x0;
+            const ly    = evt.nativeEvent.locationY ?? tap.y0;
+            const cam   = cameraRef.current;
+            const viewW = layoutSizeRef.current.width;
+            const viewH = layoutSizeRef.current.height;
+            if (cam && viewW > 0 && viewH > 0 && floorGroupsRef.current.length > 0) {
+              const ndc      = screenToNDC(lx, ly, viewW, viewH);
+              const allMeshes = floorGroupsRef.current.flatMap((fg) => fg.meshes);
+              const hit = castRay(ndc, cam, allMeshes, floorMeshMapRef.current, raycasterRef.current);
+              if (hit !== null) {
+                const dtap  = doubleTapRef.current;
+                const dtGap = Date.now() - dtap.lastT;
+                if (dtGap < 260 && Math.hypot(lx - dtap.lastX, ly - dtap.lastY) < 12) {
+                  // Double-tap: gentle focus tween on hit point
+                  const bg       = buildingGroupRef.current;
+                  const startDist = distRef.current;
+                  const endDist   = bg
+                    ? Math.max(4, new THREE.Box3().setFromObject(bg).getSize(new THREE.Vector3()).length() * 0.85)
+                    : startDist * 0.75;
+                  focusTweenRef.current = {
+                    sT: cameraTargetRef.current.clone(), eT: hit.point.clone(),
+                    sDist: startDist, eDist: endDist,
+                    sEl: elevationRef.current, eEl: Math.max(0.18, Math.min(0.8, elevationRef.current)),
+                    prog: 0, dur: 0.40,
+                  };
+                  doubleTapRef.current = { lastT: 0, lastX: 0, lastY: 0 };
+                } else {
+                  // Single-tap: toggle floor selection
+                  if (hit.floorIndex !== null) {
+                    const next: number | 'all' = selectedFloorRef.current === hit.floorIndex ? 'all' : hit.floorIndex;
+                    onFloorSelectRef.current?.(next);
+                  }
+                  doubleTapRef.current = { lastT: Date.now(), lastX: lx, lastY: ly };
+                }
+              } else {
+                doubleTapRef.current = { lastT: 0, lastX: 0, lastY: 0 };
+              }
+            }
+          }
+
+          tap.active = false;
           pinchDistRef.current = 0;
           movedModelInGestureRef.current = false;
         },
-        onPanResponderTerminate: () => { pinchDistRef.current = 0; },
+
+        onPanResponderTerminate: () => {
+          if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+          if (moveModeRef.current) { moveModeRef.current = false; setShowMoveHint(false); }
+          tapRef.current.active = false;
+          pinchDistRef.current  = 0;
+        },
       }),
     [interactionMode],
   );
@@ -1021,6 +1332,9 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     // Invalidate any previous RAF loop bound to an old GL session.
     const sessionId = contextSessionRef.current + 1;
     contextSessionRef.current = sessionId;
+    // Fresh context — clear any prior loss flag and restoring banner.
+    contextLostRef.current = false;
+    setIsRestoring(false);
     cancelAnimationFrame(raffRef.current);
 
     // pixelStorei patch
@@ -1100,8 +1414,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     renderer.outputColorSpace     = THREE.SRGBColorSpace;
     renderer.toneMapping          = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure  = 1.34;
-    renderer.shadowMap.enabled    = true;
-    renderer.shadowMap.type       = THREE.PCFSoftShadowMap;
     renderer.localClippingEnabled = true;
 
     const scene = new THREE.Scene();
@@ -1111,10 +1423,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     scene.add(new THREE.HemisphereLight(0xd9e8ff, 0x5a4532, 0.48));
     const sun = new THREE.DirectionalLight(0xfff0d8, 3.25);
     sun.position.set(10, 22, 12);
-    sun.castShadow = true;
-    sun.shadow.mapSize.width  = 2048;
-    sun.shadow.mapSize.height = 2048;
-    sun.shadow.bias           = -0.0005;
     scene.add(sun);
     const fill = new THREE.DirectionalLight(0x9fc5ff, 0.45);
     fill.position.set(-10, 8, -11);
@@ -1122,15 +1430,6 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
     const rim = new THREE.DirectionalLight(0xbfe4ff, 0.72);
     rim.position.set(-7, 14, 18);
     scene.add(rim);
-
-    // Shadow catcher (static — centred at origin; building group moves to centroid)
-    const catcher = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.ShadowMaterial({ opacity: 0.25 }),
-    );
-    catcher.rotation.x = -Math.PI / 2;
-    catcher.receiveShadow = true;
-    scene.add(catcher);
 
     // Camera (use visible layout aspect to avoid GL buffer/layout mismatch)
     const initialViewW = layoutSizeRef.current.width > 0 ? layoutSizeRef.current.width : bufW;
@@ -1170,6 +1469,21 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
 
       if (!isActiveRef.current) {
         lastTime = time;
+        // Render a blank transparent frame so the GL swap-chain stays alive while
+        // the component is hidden.  Without this, some Android EGL drivers treat an
+        // unflushed surface as abandoned and destroy the context silently.
+        try {
+          renderer.setClearColor(0x000000, 0);
+          renderer.clear();
+          gl.endFrameEXP();
+        } catch {
+          // Context lost mid-inactivity.  Record it so focus-return can remount.
+          contextLostRef.current = true;
+          if (contextSessionRef.current === sessionId) {
+            contextSessionRef.current += 1;
+            cancelAnimationFrame(raffRef.current);
+          }
+        }
         return;
       }
 
@@ -1244,6 +1558,8 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
       if (animKeyRef.current !== loopKey) {
         loopKey           = animKeyRef.current;
         buildTRef.current = 0;
+        cinematicFiredRef.current = false; // allow cinematic to fire again for new build
+        cinematicRef.current?.cancel();
       }
 
       const cfg2   = configRef.current;
@@ -1253,6 +1569,11 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         buildTRef.current = Math.min(1, buildTRef.current + dt / dur);
         if (buildTRef.current >= 1) {
           onBuildCompleteRef.current?.();
+          // Fire cinematic once per build cycle
+          if (!cinematicFiredRef.current) {
+            cinematicFiredRef.current = true;
+            cinematicRef.current?.runFramingAndOrbit();
+          }
         }
       }
 
@@ -1271,7 +1592,8 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         const revealFrac = (floorIdx + eased) / floors;
         const revealY    = revealFrac * totalH;
 
-        clipPlane.constant = revealY;
+        // In explode mode (build complete), lift clip so offset floor groups stay visible
+        clipPlane.constant = (explodeEnabledRef.current && buildTRef.current >= 1) ? 999 : revealY;
 
         if (scanline && scanlineMat) {
           if (t > 0.001 && t < 0.999) {
@@ -1283,6 +1605,30 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
             if (t >= 1) scanlineMat.opacity = 0;
           }
         }
+      }
+
+      // Advance explode tweens (floor Y-offset animation)
+      if (explodeTweensRef.current.length > 0) {
+        const stillActive = tickExplodeTweens(explodeTweensRef.current, time);
+        if (!stillActive) explodeTweensRef.current = [];
+      }
+
+      // Tick cinematic camera controller
+      const cinematicNowActive = cinematicRef.current?.tick(time, dt) ?? false;
+      if (cinematicNowActive !== cinematicWasActiveRef.current) {
+        cinematicWasActiveRef.current = cinematicNowActive;
+        setCinematicActive(cinematicNowActive);
+      }
+
+      // Smooth double-tap focus tween
+      const ft = focusTweenRef.current;
+      if (ft && dt > 0) {
+        ft.prog = Math.min(1, ft.prog + dt / ft.dur);
+        const e = ft.prog < 1 ? ft.prog * ft.prog * (3 - 2 * ft.prog) : 1; // smoothstep
+        cameraTargetRef.current.lerpVectors(ft.sT, ft.eT, e);
+        distRef.current      = ft.sDist + (ft.eDist - ft.sDist) * e;
+        elevationRef.current = ft.sEl   + (ft.eEl   - ft.sEl)   * e;
+        if (ft.prog >= 1) focusTweenRef.current = null;
       }
 
       // Resize
@@ -1419,9 +1765,17 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
           setIsWarmingUp(false);
         }
       } catch {
+        contextLostRef.current = true;
         if (contextSessionRef.current === sessionId) {
           contextSessionRef.current += 1;
           cancelAnimationFrame(raffRef.current);
+          // If the context died while the component is actively visible, kick off
+          // an immediate recovery rather than waiting for the next focus cycle.
+          if (isActiveRef.current) {
+            setGlReady(false);
+            setIsRestoring(true);
+            setGlKey(k => k + 1);
+          }
         }
       }
     };
@@ -1437,7 +1791,7 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
   return (
     <View style={[StyleSheet.absoluteFill, styles.root]} onLayout={onRootLayout}>
       <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers}>
-        <GLView style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
+        <GLView key={glKey} style={StyleSheet.absoluteFill} onContextCreate={onContextCreate} />
       </View>
 
 
@@ -1445,8 +1799,22 @@ export const Procedural3DBuilding: React.FC<Procedural3DBuildingProps> = ({
         <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color="#00d4ff" />
           <Text style={styles.loadingText}>
-            {!glReady ? 'Building scene…' : 'Preparing view...'}
+            {!glReady
+              ? (isRestoring ? 'Restoring 3D…' : 'Building scene…')
+              : 'Preparing view...'}
           </Text>
+        </View>
+      )}
+
+      {cinematicActive && (
+        <View style={styles.cinematicBadge} pointerEvents="none">
+          <Text style={styles.cinematicBadgeText}>{'▶ PREVIEW'}</Text>
+        </View>
+      )}
+
+      {showMoveHint && (
+        <View style={styles.moveHint} pointerEvents="none">
+          <Text style={styles.moveHintText}>MOVE</Text>
         </View>
       )}
 
@@ -1470,6 +1838,41 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'monospace',
     letterSpacing: 1,
+  },
+
+  cinematicBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.3)',
+  },
+  cinematicBadgeText: {
+    color: 'rgba(0,212,255,0.75)',
+    fontSize: 9,
+    fontFamily: 'monospace',
+    letterSpacing: 2,
+  },
+  moveHint: {
+    position: 'absolute',
+    top: 12,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.5)',
+  },
+  moveHintText: {
+    color: '#00d4ff',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    letterSpacing: 3,
   },
 
 });

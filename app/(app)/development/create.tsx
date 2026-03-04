@@ -116,7 +116,7 @@ export default function CreateDevelopmentScreen() {
         />
         <View style={styles.row}>
           <AnimatedInput
-            style={[styles.input, { flex: 2, marginRight: 8 }]}
+            style={[styles.input, { flex: 1, marginRight: 8 }]}
             placeholder="City"
             placeholderTextColor={PLACEHOLDER}
             value={form.city ?? ''}
@@ -126,7 +126,6 @@ export default function CreateDevelopmentScreen() {
             style={[styles.input, { flex: 1 }]}
             placeholder="State"
             placeholderTextColor={PLACEHOLDER}
-            autoCapitalize="characters"
             value={form.state ?? ''}
             onChangeText={(v) => setField('state', v)}
           />

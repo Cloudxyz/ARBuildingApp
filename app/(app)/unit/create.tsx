@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   Modal,
   StyleSheet,
@@ -15,6 +16,7 @@ import { useRouter, Stack } from 'expo-router';
 import { useDialog } from '../../../src/lib/dialog';
 import { useDevelopments, useUnits } from '../../../src/hooks/useUnits';
 import { UnitInsert, UnitStatus, UnitType } from '../../../src/types';
+import { resizeFloors } from '../../../src/lib/floors';
 import { supabase } from '../../../src/lib/supabase';
 
 const ACCENT = '#00d4ff';
@@ -40,6 +42,7 @@ export default function CreateUnitScreen() {
   const dialog = useDialog();
   const [loading, setLoading] = useState(false);
   const [devPickerVisible, setDevPickerVisible] = useState(false);
+const [floors, setFloors] = useState<string[]>(['']);
 
   // Per-type GLB drafts (keyed by UnitType)
   type TypeModelDraft = { glbUrl: string | null; storagePath: string | null; externalGlbUrl: string };
@@ -58,14 +61,12 @@ export default function CreateUnitScreen() {
     address: '',
     city: '',
     state: '',
-    country: 'US',
+    country: '',
     status: 'available',
     unit_type: 'land',
     development_id: null,
     area_sqm: undefined,
     price: undefined,
-    latitude: undefined,
-    longitude: undefined,
   });
 
   const setField = (key: keyof UnitInsert, value: string | number | null) =>
@@ -127,21 +128,20 @@ export default function CreateUnitScreen() {
       return;
     }
     setLoading(true);
-    const unit = await createUnit({
+    const { unit, error: saveError } = await createUnit({
       name: form.name.trim(),
       description: form.description ?? null,
       address: form.address ?? null,
       city: form.city ?? null,
       state: form.state ?? null,
-      country: form.country ?? 'US',
+      country: form.country?.trim() || 'US',
       status: form.status ?? 'available',
       unit_type: form.unit_type ?? 'land',
       area_sqm: form.area_sqm ?? null,
       price: form.price ?? null,
-      latitude: form.latitude ?? null,
-      longitude: form.longitude ?? null,
       development_id: form.development_id ?? null,
       thumbnail_url: null,
+      floors,
     });
     if (unit) {
       // Persist per-type GLB models now that we have a unit ID
@@ -166,7 +166,7 @@ export default function CreateUnitScreen() {
       router.replace({ pathname: '/(app)/unit/[id]', params: { id: unit.id, name: form.name?.trim() ?? '' } });
     } else {
       setLoading(false);
-      await dialog.alert({ title: 'Error', message: 'Could not save unit. Check your connection.' });
+      await dialog.alert({ title: 'Error', message: saveError ?? 'Could not save unit. Check your connection.' });
     }
   };
 
@@ -208,7 +208,7 @@ export default function CreateUnitScreen() {
         />
         <View style={styles.row}>
           <AnimatedInput
-            style={[styles.input, { flex: 2, marginRight: 8 }]}
+            style={[styles.input, { flex: 1, marginRight: 8 }]}
             placeholder="City"
             placeholderTextColor={PLACEHOLDER}
             value={form.city ?? ''}
@@ -218,29 +218,17 @@ export default function CreateUnitScreen() {
             style={[styles.input, { flex: 1 }]}
             placeholder="State"
             placeholderTextColor={PLACEHOLDER}
-            autoCapitalize="characters"
             value={form.state ?? ''}
             onChangeText={(v) => setField('state', v)}
           />
         </View>
-        <View style={styles.row}>
-          <AnimatedInput
-            style={[styles.input, { flex: 1, marginRight: 8 }]}
-            placeholder="Latitude"
-            placeholderTextColor={PLACEHOLDER}
-            keyboardType="numeric"
-            value={form.latitude?.toString() ?? ''}
-            onChangeText={(v) => setField('latitude', v ? parseFloat(v) : null)}
-          />
-          <AnimatedInput
-            style={[styles.input, { flex: 1 }]}
-            placeholder="Longitude"
-            placeholderTextColor={PLACEHOLDER}
-            keyboardType="numeric"
-            value={form.longitude?.toString() ?? ''}
-            onChangeText={(v) => setField('longitude', v ? parseFloat(v) : null)}
-          />
-        </View>
+        <AnimatedInput
+          style={styles.input}
+          placeholder="Country (e.g. US, MX)"
+          placeholderTextColor={PLACEHOLDER}
+          value={form.country ?? ''}
+          onChangeText={(v) => setField('country', v)}
+        />
 
         <Text style={styles.sectionLabel}>DETAILS</Text>
         <View style={styles.row}>
@@ -377,6 +365,51 @@ export default function CreateUnitScreen() {
           />
         </View>
 
+        <Text style={styles.sectionLabel}>VIRTUAL TOURS (MATTERPORT)</Text>
+        <View style={styles.tourPanel}>
+          <View style={styles.tourStepperRow}>
+            <Text style={styles.tourLabel}>Floors</Text>
+            <View style={styles.stepper}>
+              <TouchableOpacity style={styles.stepBtn} onPress={() => setFloors(f => resizeFloors(f, f.length - 1))}>
+                <Text style={styles.stepBtnText}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.stepVal}>{floors.length}</Text>
+              <TouchableOpacity style={styles.stepBtn} onPress={() => setFloors(f => resizeFloors(f, f.length + 1))}>
+                <Text style={styles.stepBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          {floors.map((url, i) => {
+            const fi = i + 1;
+            const valid = url.startsWith('https://');
+            const isMatter = url.includes('matterport');
+            const status = url === '' ? 'missing' : valid ? (isMatter ? 'matterport' : 'external') : 'invalid';
+            return (
+              <View key={fi} style={styles.tourRow}>
+                <Text style={styles.tourFloorLabel}>Floor {fi}</Text>
+                <TextInput
+                  style={styles.tourInput}
+                  placeholder="https://my.matterport.com/show/..."
+                  placeholderTextColor={PLACEHOLDER}
+                  value={url}
+                  onChangeText={v => setFloors(prev => { const next = [...prev]; next[i] = v; return next; })}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                />
+                <Text style={[
+                  styles.tourStatus,
+                  status === 'matterport' && { color: '#00ff88' },
+                  status === 'external'   && { color: '#ffe044' },
+                  status === 'invalid'    && { color: '#ff6666' },
+                ]}>
+                  {status === 'missing' ? '○ Missing' : status === 'matterport' ? '● Matterport' : status === 'external' ? '● External tour' : '✕ Must start with https://'}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+
         <Text style={styles.sectionLabel}>DEVELOPMENT (OPTIONAL)</Text>
         {developmentsLoading ? (
           <ActivityIndicator color={ACCENT} style={{ marginVertical: 8 }} />
@@ -434,6 +467,7 @@ export default function CreateUnitScreen() {
                         style={[styles.modalOption, form.development_id === d.id && styles.modalOptionActive]}
                         onPress={() => {
                           setField('development_id', d.id);
+                          if (!form.country?.trim()) setField('country', d.country ?? 'US');
                           setDevPickerVisible(false);
                         }}
                       >
@@ -674,5 +708,47 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: 'center',
     marginVertical: 4,
+  },
+  tourPanel: {
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: INPUT_BORDER,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    gap: 10,
+  },
+  tourStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tourLabel: { color: FORM_TEXT, fontSize: 12, fontFamily: 'monospace' },
+  stepper: { flexDirection: 'row', alignItems: 'center' },
+  stepBtn: {
+    width: 32, height: 32,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,212,255,0.12)',
+    borderColor: BORDER, borderWidth: 1, borderRadius: 6,
+  },
+  stepBtnText: { color: ACCENT, fontSize: 18, fontWeight: '700' },
+  stepVal: { color: FORM_TEXT, fontSize: 14, fontWeight: '700', minWidth: 32, textAlign: 'center' },
+  tourRow: { gap: 4 },
+  tourFloorLabel: { color: ACCENT, fontSize: 9, fontFamily: 'monospace', letterSpacing: 1 },
+  tourInput: {
+    backgroundColor: BG,
+    borderWidth: 1,
+    borderColor: INPUT_BORDER,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    color: FORM_TEXT,
+    fontSize: 12,
+  },
+  tourStatus: {
+    color: PLACEHOLDER,
+    fontSize: 9,
+    fontFamily: 'monospace',
+    letterSpacing: 1,
   },
 });
