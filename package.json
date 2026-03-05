@@ -9,6 +9,11 @@
     "web": "expo start --web",
     "lint": "expo lint"
   },
+	"overrides": {
+		"@expo/browser-polyfill": {
+		"react": "19.1.0"
+		}
+	},
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native/virtualized-lists": "0.81.5",
