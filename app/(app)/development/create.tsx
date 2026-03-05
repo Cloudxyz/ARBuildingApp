@@ -100,7 +100,7 @@ export default function CreateDevelopmentScreen() {
               onPress={() => setField('type', type)}
             >
               <Text style={[styles.typeBtnText, form.type === type && styles.typeBtnTextActive]}>
-                {type.toUpperCase()}
+                {type}
               </Text>
             </AnimatedPressable>
           ))}

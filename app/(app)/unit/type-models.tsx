@@ -12,7 +12,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Stack } from 'expo-router';
 import { useDialog } from '../../../src/lib/dialog';
 import { useUnitTypeModels } from '../../../src/hooks/useUnits';
-import { supabase } from '../../../src/lib/supabase';
+import { uploadGlb, deleteUpload, loadUser } from '../../../src/lib/api';
 import { UnitTypeModel } from '../../../src/types';
 
 const ACCENT = '#00d4ff';
@@ -70,52 +70,38 @@ export default function UnitTypeModelsScreen() {
         return;
       }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      setBusyType(unitType);
+
+      const user = await loadUser();
       if (!user) {
         await dialog.alert({ title: 'Error', message: 'Please sign in again to upload files.' });
+        setBusyType(null);
         return;
       }
 
-      setBusyType(unitType);
-
-      const res = await fetch(file.uri);
-      const blob = await res.blob();
-
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `${user.id}/unit-type-models/${unitType}/${Date.now()}_${safeName}`;
+      const uploadName = `${unitType}_${Date.now()}_${safeName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('unit-models')
-        .upload(storagePath, blob, {
-          contentType: 'model/gltf-binary',
-          upsert: true,
-        });
+      const publicUrl = await uploadGlb(file.uri, uploadName);
 
-      if (uploadError) {
-        throw new Error(uploadError.message);
-      }
-
-      const { data } = supabase.storage.from('unit-models').getPublicUrl(storagePath);
       const previous = modelsByType[unitType];
       const saved = await upsertUnitTypeModel({
         unit_type: unitType,
-        model_glb_url: data.publicUrl,
-        storage_path: storagePath,
+        model_glb_url: publicUrl,
+        storage_path: uploadName,
       });
 
       if (!saved) {
-        await supabase.storage.from('unit-models').remove([storagePath]);
+        await deleteUpload(publicUrl).catch(() => {});
         await dialog.alert({ title: 'Error', message: 'Could not save model reference in database.' });
         return;
       }
 
-      if (previous?.storage_path && previous.storage_path !== storagePath) {
-        await supabase.storage.from('unit-models').remove([previous.storage_path]);
+      if (previous?.model_glb_url && previous.model_glb_url !== publicUrl) {
+        await deleteUpload(previous.model_glb_url).catch(() => {});
       }
 
-      await dialog.alert({ title: 'Uploaded', message: `${unitType.toUpperCase()} uploaded model updated.` });
+      await dialog.alert({ title: 'Uploaded', message: `${unitType} uploaded model updated.` });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown upload error';
       await dialog.alert({ title: 'Upload failed', message });
@@ -157,7 +143,7 @@ export default function UnitTypeModelsScreen() {
 
     const confirmed = await dialog.confirm({
       title: 'Remove uploaded file',
-      message: `Remove uploaded ${unitType.toUpperCase()} file?`,
+      message: `Remove uploaded ${unitType} file?`,
       confirmText: 'Remove',
       destructive: true,
     });
@@ -165,8 +151,8 @@ export default function UnitTypeModelsScreen() {
 
     setBusyType(unitType);
     try {
-      if (current.storage_path) {
-        await supabase.storage.from('unit-models').remove([current.storage_path]);
+      if (current.model_glb_url) {
+        await deleteUpload(current.model_glb_url).catch(() => {});
       }
       const saved = await upsertUnitTypeModel({
         unit_type: unitType,
@@ -207,7 +193,7 @@ export default function UnitTypeModelsScreen() {
           return (
             <View key={unitType} style={styles.card}>
               <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>{unitType.toUpperCase()}</Text>
+                <Text style={styles.cardTitle}>{unitType}</Text>
                 <Text
                   style={[
                     styles.cardStatus,

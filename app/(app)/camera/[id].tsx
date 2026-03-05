@@ -4,7 +4,7 @@
  * Unit AR Preview - same architecture as ARViewsDemoScreen but with:
  *  - Live camera feed as background (blueprint + 3d modes)
  *  - Unit-specific GLB model loaded in 3D view
- *  - Config persisted via useARBuildingModel / Supabase
+ *  - Config persisted via useARBuildingModel / REST API
  *
  * Modes:
  *  - blueprint  -> IsometricBlueprintView (solid dark background + blueprint grid)
@@ -28,14 +28,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   Platform,
   LayoutChangeEvent,
   useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
-import { useDialog } from '../../../src/lib/dialog';
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -86,7 +84,6 @@ const LAND_PREVIEW_TYPES: Array<Exclude<UnitType, 'land'>> = [
 export default function UnitARPreviewScreen() {
   const isFocused = useIsFocused();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const dialog = useDialog();
   const { units } = useUnits();
   const unit = units.find((u) => u.id === id);
 
@@ -132,15 +129,9 @@ export default function UnitARPreviewScreen() {
   const [viewMode, setViewMode] = useState<ARViewMode>('blueprint');
   const isMagicMode = viewMode === 'magic3d';
 
-  // -- Shared AR config (persisted via Supabase) ------------------------------
+  // -- Shared AR config (persisted via REST API) ------------------------------
   const ar = useARBuildingModel(id);
-  const { config, updateConfig, isSaving } = ar;
-
-  const handleSave = async () => {
-    const ok = await ar.save();
-    if (ok) await dialog.alert({ title: 'Saved', message: 'Building configuration saved.' });
-    else    await dialog.alert({ title: 'Error', message: 'Failed to save. Check your connection.' });
-  };
+  const { config, updateConfig } = ar;
 
   // -- Blueprint state --------------------------------------------------------
   const [blueprintIsPlaying, setBlueprintIsPlaying] = useState(false);
@@ -639,7 +630,7 @@ export default function UnitARPreviewScreen() {
           <Text style={styles.labelText}>
             {isMagicMode
               ? 'MAGIC - PHOTO to 3D'
-              : `${unit?.name?.toUpperCase() ?? 'UNIT'} - AR PREVIEW`}
+              : `${unit?.name ?? 'UNIT'} - AR PREVIEW`}
           </Text>
         </View>
 
@@ -716,17 +707,6 @@ export default function UnitARPreviewScreen() {
               </Text>
             </TouchableOpacity>
 
-            {!isMagicMode && (
-              <TouchableOpacity
-                style={[styles.saveBtn, isSaving && styles.btnDisabled]}
-                onPress={handleSave}
-                disabled={isSaving}
-              >
-                {isSaving
-                  ? <ActivityIndicator color={GREEN} size="small" />
-                  : <Text style={styles.saveBtnText}>SAVE</Text>}
-              </TouchableOpacity>
-            )}
           </View>
 
           {/* Land type selector */}
@@ -745,7 +725,7 @@ export default function UnitARPreviewScreen() {
                         landPreviewType === t && { color: ACCENT },
                       ]}
                     >
-                      {t.toUpperCase()}
+                      {t}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -783,7 +763,7 @@ export default function UnitARPreviewScreen() {
                     onPress={() => setMagicSelectedType(t)}
                   >
                     <Text style={[styles.typeChipText, magicSelectedType === t && { color: ACCENT }]}>
-                      {t.toUpperCase()}
+                      {t}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -1085,7 +1065,7 @@ const styles = StyleSheet.create({
 
   saveBtn: {
     borderWidth: 1, borderColor: GREEN, borderRadius: 6,
-    paddingVertical: 12, paddingHorizontal: 20,
+    paddingVertical: 8, paddingHorizontal: 14,
     alignItems: 'center', justifyContent: 'center', minWidth: 72,
   },
   saveBtnText: {

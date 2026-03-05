@@ -17,7 +17,7 @@ import { useDialog } from '../../../src/lib/dialog';
 import { useDevelopments, useUnits } from '../../../src/hooks/useUnits';
 import { UnitInsert, UnitStatus, UnitType } from '../../../src/types';
 import { resizeFloors } from '../../../src/lib/floors';
-import { supabase } from '../../../src/lib/supabase';
+import { uploadGlb, api } from '../../../src/lib/api';
 
 const ACCENT = '#00d4ff';
 const BG = '#070714';
@@ -93,28 +93,16 @@ const [floors, setFloors] = useState<string[]>(['']);
       const fileName = file.name ?? `unit_model_${Date.now()}.glb`;
       if (!fileName.toLowerCase().endsWith('.glb')) { await dialog.alert({ title: 'Invalid file', message: 'Please select a .glb file.' }); return; }
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { await dialog.alert({ title: 'Error', message: 'Please sign in again to upload files.' }); return; }
-
       setUploadingModelType(type);
-      const res = await fetch(file.uri);
-      const blob = await res.blob();
-
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `${user.id}/type-models/${type}/${Date.now()}_${safeName}`;
+      const uploadName = `${Date.now()}_${safeName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('unit-models')
-        .upload(storagePath, blob, { contentType: 'model/gltf-binary', upsert: true });
-
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data } = supabase.storage.from('unit-models').getPublicUrl(storagePath);
+      const publicUrl = await uploadGlb(file.uri, uploadName);
       setTypeModels((prev) => ({
         ...prev,
-        [type]: { ...prev[type], glbUrl: data.publicUrl, storagePath },
+        [type]: { ...prev[type], glbUrl: publicUrl, storagePath: uploadName },
       }));
-      await dialog.alert({ title: 'Uploaded', message: `${type.toUpperCase()} model uploaded successfully.` });
+      await dialog.alert({ title: 'Uploaded', message: `${type} model uploaded successfully.` });
     } catch (err) {
       await dialog.alert({ title: 'Upload failed', message: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
@@ -145,24 +133,27 @@ const [floors, setFloors] = useState<string[]>(['']);
     });
     if (unit) {
       // Persist per-type GLB models now that we have a unit ID
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await Promise.all(
-          UNIT_TYPE_OPTIONS.map((type) => {
+      const glbErrors: string[] = [];
+      await Promise.all(
+        UNIT_TYPE_OPTIONS.map(async (type) => {
+          try {
             const draft = typeModels[type];
-            if (!draft.glbUrl && !draft.externalGlbUrl.trim()) return Promise.resolve();
-            return supabase.from('unit_glb_models').insert({
-              unit_id: unit.id,
-              user_id: user.id,
-              unit_type: type,
-              glb_url: draft.glbUrl ?? null,
-              storage_path: draft.storagePath ?? null,
-              external_glb_url: draft.externalGlbUrl.trim() || null,
-            });
-          }),
-        );
-      }
+            if (!draft?.glbUrl && !draft?.externalGlbUrl?.trim()) return;
+            const body: Record<string, unknown> = { unit_type: type };
+            if (draft.glbUrl)                    body.glb_url          = draft.glbUrl;
+            if (draft.storagePath)               body.storage_path     = draft.storagePath;
+            if (draft.externalGlbUrl.trim())     body.external_glb_url = draft.externalGlbUrl.trim();
+            await api('POST', `/api/units/${unit.id}/glb-models`, body);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            glbErrors.push(`${type}: ${msg}`);
+          }
+        }),
+      );
       setLoading(false);
+      if (glbErrors.length > 0) {
+        await dialog.alert({ title: 'Warning — Model Save Failed', message: glbErrors.join('\n\n') });
+      }
       router.replace({ pathname: '/(app)/unit/[id]', params: { id: unit.id, name: form.name?.trim() ?? '' } });
     } else {
       setLoading(false);
@@ -262,7 +253,7 @@ const [floors, setFloors] = useState<string[]>(['']);
               onPress={() => setField('status', s)}
             >
               <Text style={[styles.statusBtnText, form.status === s && { color: STATUS_COLORS[s] }]}>
-                {s.toUpperCase()}
+                {s}
               </Text>
             </AnimatedPressable>
           ))}
@@ -280,7 +271,7 @@ const [floors, setFloors] = useState<string[]>(['']);
               onPress={() => setField('unit_type', type)}
             >
               <Text style={[styles.statusBtnText, form.unit_type === type && { color: ACCENT }]}>
-                {type.toUpperCase()}
+                {type}
               </Text>
             </AnimatedPressable>
           ))}
@@ -311,7 +302,7 @@ const [floors, setFloors] = useState<string[]>(['']);
                   activeModelType === type && { color: ACCENT },
                   hasDraft && activeModelType !== type && { color: '#00ff88' },
                 ]}>
-                  {type.toUpperCase()}
+                  {type}
                 </Text>
               </AnimatedPressable>
             );

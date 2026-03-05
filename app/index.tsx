@@ -1,15 +1,15 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { supabase } from '../src/lib/supabase';
+import { getToken } from '../src/lib/api';
 
 export default function Index() {
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuthenticated(!!session);
+    getToken().then((token) => {
+      setIsAuthenticated(!!token);
       setLoading(false);
     });
   }, []);

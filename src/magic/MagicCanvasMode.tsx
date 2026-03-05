@@ -29,7 +29,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { supabase } from '../lib/supabase';
 import { FloorPicker } from '../tours/FloorPicker';
 import { FloorTourModal } from './FloorTourModal';
 import { normalizeFloors, getFloorsTotalFromArr, getTourUrlFromArr } from '../lib/floors';

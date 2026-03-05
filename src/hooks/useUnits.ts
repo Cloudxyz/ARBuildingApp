@@ -1,26 +1,41 @@
-import { useCallback, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+﻿import { useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
 import {
   Development,
   DevelopmentInsert,
   DevelopmentUpdate,
   Unit,
   UnitGlbModel,
-  UnitGlbModelInsert,
-  UnitGlbModelUpdate,
   UnitInsert,
   UnitModel,
-  UnitModelInsert,
-  UnitModelUpdate,
   UnitType,
   UnitTypeModel,
-  UnitTypeModelInsert,
   UnitUpdate,
 } from '../types';
 
-// =============================================
-// useDevelopments - CRUD for developments table
-// =============================================
+// =================================================================
+// Helpers
+// =================================================================
+
+/**
+ * MySQL returns JSON/TEXT columns as raw strings.
+ * Parse `floors` into an array so the rest of the app always sees string[].
+ */
+function parseUnitFloors(unit: Unit): Unit {
+  if (typeof (unit as any).floors === 'string') {
+    try {
+      const parsed = JSON.parse((unit as any).floors);
+      return { ...unit, floors: Array.isArray(parsed) ? parsed : null };
+    } catch {
+      return { ...unit, floors: null };
+    }
+  }
+  return unit;
+}
+
+// =================================================================
+// useDevelopments
+// =================================================================
 export function useDevelopments() {
   const [developments, setDevelopments] = useState<Development[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,77 +44,57 @@ export function useDevelopments() {
   const fetchDevelopments = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('developments')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) setError(error.message);
-    else setDevelopments(data as Development[]);
-    setLoading(false);
+    try {
+      const res = await api<{ developments: Development[] }>('GET', '/api/developments');
+      setDevelopments(res.developments ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load developments');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => {
-    fetchDevelopments();
-  }, [fetchDevelopments]);
+  useEffect(() => { fetchDevelopments(); }, [fetchDevelopments]);
 
   const createDevelopment = async (input: DevelopmentInsert): Promise<Development | null> => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    const { data, error } = await supabase
-      .from('developments')
-      .insert({ ...input, user_id: user.id })
-      .select()
-      .single();
-
-    if (error) {
-      setError(error.message);
+    try {
+      const res = await api<{ development: Development }>('POST', '/api/developments', input);
+      setDevelopments((prev) => [res.development, ...prev]);
+      return res.development;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create development');
       return null;
     }
-
-    setDevelopments((prev) => [data as Development, ...prev]);
-    return data as Development;
   };
 
   const updateDevelopment = async (id: string, updates: DevelopmentUpdate): Promise<boolean> => {
-    const { error } = await supabase.from('developments').update(updates).eq('id', id);
-    if (error) {
-      setError(error.message);
+    try {
+      const res = await api<{ development: Development }>('PUT', `/api/developments/${id}`, updates);
+      setDevelopments((prev) => prev.map((d) => (d.id === id ? res.development : d)));
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update development');
       return false;
     }
-
-    setDevelopments((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
-    return true;
   };
 
   const deleteDevelopment = async (id: string): Promise<boolean> => {
-    const { error } = await supabase.from('developments').delete().eq('id', id);
-    if (error) {
-      setError(error.message);
+    try {
+      await api('DELETE', `/api/developments/${id}`);
+      setDevelopments((prev) => prev.filter((d) => d.id !== id));
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete development');
       return false;
     }
-
-    setDevelopments((prev) => prev.filter((d) => d.id !== id));
-    return true;
   };
 
-  return {
-    developments,
-    loading,
-    error,
-    fetchDevelopments,
-    createDevelopment,
-    updateDevelopment,
-    deleteDevelopment,
-  };
+  return { developments, loading, error, fetchDevelopments, createDevelopment, updateDevelopment, deleteDevelopment };
 }
 
-// =============================================
-// useUnits - CRUD for units table
-// =============================================
+// =================================================================
+// useUnits
+// =================================================================
 export function useUnits() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,92 +103,66 @@ export function useUnits() {
   const fetchUnits = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('units')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) setError(error.message);
-    else setUnits(data as Unit[]);
-    setLoading(false);
+    try {
+      const res = await api<{ units: Unit[] }>('GET', '/api/units');
+      setUnits((res.units ?? []).map(parseUnitFloors));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load units');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => {
-    fetchUnits();
-  }, [fetchUnits]);
+  useEffect(() => { fetchUnits(); }, [fetchUnits]);
 
-  const createUnit = async (input: UnitInsert): Promise<{ unit: Unit | null; error: string | null }> => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { unit: null, error: 'Not authenticated.' };
-
-    const { data, error } = await supabase
-      .from('units')
-      .insert({ ...input, user_id: user.id })
-      .select()
-      .single();
-
-    if (error) {
-      // Graceful fallback: if floors column doesn't exist yet, retry without it
-      if (input.floors != null && error.message.includes('floors')) {
-        const { floors: _f, ...inputWithoutFloors } = input;
-        const { data: data2, error: error2 } = await supabase
-          .from('units')
-          .insert({ ...inputWithoutFloors, user_id: user.id })
-          .select()
-          .single();
-        if (!error2) {
-          setUnits((prev) => [data2 as Unit, ...prev]);
-          return { unit: data2 as Unit, error: null };
-        }
-        setError(error2.message);
-        return { unit: null, error: error2.message };
-      }
-      setError(error.message);
-      return { unit: null, error: error.message };
+  const createUnit = async (
+    input: UnitInsert,
+  ): Promise<{ unit: Unit | null; error: string | null }> => {
+    try {
+      const res = await api<{ unit: Unit }>('POST', '/api/units', input);
+      const unit = parseUnitFloors(res.unit);
+      setUnits((prev) => [unit, ...prev]);
+      return { unit, error: null };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create unit';
+      setError(message);
+      return { unit: null, error: message };
     }
-    setUnits((prev) => [data as Unit, ...prev]);
-    return { unit: data as Unit, error: null };
   };
 
-  const updateUnit = async (id: string, updates: UnitUpdate): Promise<{ ok: boolean; error: string | null }> => {
-    const { error } = await supabase.from('units').update(updates).eq('id', id);
-    if (error) {
-      // Graceful fallback: if floors column doesn't exist yet, retry without it
-      if (updates.floors != null && error.message.includes('floors')) {
-        const { floors: _f, ...updatesWithoutFloors } = updates;
-        const { error: error2 } = await supabase.from('units').update(updatesWithoutFloors).eq('id', id);
-        if (!error2) {
-          setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...updatesWithoutFloors } : u)));
-          return { ok: true, error: null };
-        }
-        setError(error2.message);
-        return { ok: false, error: error2.message };
-      }
-      setError(error.message);
-      return { ok: false, error: error.message };
+  const updateUnit = async (
+    id: string,
+    updates: UnitUpdate,
+  ): Promise<{ ok: boolean; error: string | null }> => {
+    try {
+      const res = await api<{ unit: Unit }>('PUT', `/api/units/${id}`, updates);
+      const unit = parseUnitFloors(res.unit);
+      setUnits((prev) => prev.map((u) => (u.id === id ? unit : u)));
+      return { ok: true, error: null };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update unit';
+      setError(message);
+      return { ok: false, error: message };
     }
-    setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...updates } : u)));
-    return { ok: true, error: null };
   };
 
   const deleteUnit = async (id: string): Promise<boolean> => {
-    const { error } = await supabase.from('units').delete().eq('id', id);
-    if (error) {
-      setError(error.message);
+    try {
+      await api('DELETE', `/api/units/${id}`);
+      setUnits((prev) => prev.filter((u) => u.id !== id));
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete unit');
       return false;
     }
-    setUnits((prev) => prev.filter((u) => u.id !== id));
-    return true;
   };
 
   return { units, loading, error, fetchUnits, createUnit, updateUnit, deleteUnit };
 }
 
-// =============================================
-// useUnitModel - CRUD for unit_models table
-// =============================================
+// =================================================================
+// useUnitModel  (one model per unit â€” footprint mesh)
+// =================================================================
 export function useUnitModel(unitId: string) {
   const [model, setModel] = useState<UnitModel | null>(null);
   const [loading, setLoading] = useState(true);
@@ -202,76 +171,75 @@ export function useUnitModel(unitId: string) {
   const fetchModel = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('unit_models')
-      .select('*')
-      .eq('unit_id', unitId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) setError(error.message);
-    else setModel(data as UnitModel | null);
-    setLoading(false);
+    try {
+      const res = await api<{ model: UnitModel | null }>('GET', `/api/units/${unitId}/model`);
+      setModel(res.model ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load model');
+    } finally {
+      setLoading(false);
+    }
   }, [unitId]);
 
-  useEffect(() => {
-    fetchModel();
-  }, [fetchModel]);
+  useEffect(() => { fetchModel(); }, [fetchModel]);
 
-  const saveModel = async (input: UnitModelInsert): Promise<UnitModel | null> => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    const payload = { ...input, unit_id: unitId, user_id: user.id };
-    const { data: existing, error: existingError } = await supabase
-      .from('unit_models')
-      .select('id')
-      .eq('unit_id', unitId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existingError) {
-      setError(existingError.message);
+  /** Upsert the unit model (AR config + optional glb_url/storage_path). */
+  const saveModel = async (
+    input: {
+      glb_url?: string | null;
+      storage_path?: string | null;
+      floor_count?: number | null;
+      scale?: number | null;
+      rotation_deg?: number | null;
+      building_type?: string | null;
+      color_scheme?: string | null;
+      footprint_w?: number | null;
+      footprint_h?: number | null;
+      model_data?: Record<string, unknown> | null;
+      [key: string]: unknown;
+    },
+  ): Promise<UnitModel | null> => {
+    try {
+      const res = await api<{ model: UnitModel }>('POST', `/api/units/${unitId}/model`, input);
+      setModel(res.model);
+      return res.model;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save model');
       return null;
     }
-
-    const modelId = existing?.id ?? model?.id ?? null;
-    const { data, error } = modelId
-      ? await supabase.from('unit_models').update(payload).eq('id', modelId).select().single()
-      : await supabase.from('unit_models').insert(payload).select().single();
-
-    if (error) {
-      setError(error.message);
-      return null;
-    }
-    setModel(data as UnitModel);
-    return data as UnitModel;
   };
 
-  const updateModel = async (updates: UnitModelUpdate): Promise<boolean> => {
+  const updateModel = async (
+    updates: {
+      glb_url?: string | null;
+      storage_path?: string | null;
+      floor_count?: number | null;
+      scale?: number | null;
+      rotation_deg?: number | null;
+      building_type?: string | null;
+      color_scheme?: string | null;
+      footprint_w?: number | null;
+      footprint_h?: number | null;
+      model_data?: Record<string, unknown> | null;
+    },
+  ): Promise<boolean> => {
     if (!model) return false;
-    const { error } = await supabase
-      .from('unit_models')
-      .update(updates)
-      .eq('id', model.id);
-    if (error) {
-      setError(error.message);
+    try {
+      const res = await api<{ model: UnitModel }>('PUT', `/api/unit-models/${model.id}`, updates);
+      setModel((prev) => (prev ? { ...prev, ...res.model } : prev));
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update model');
       return false;
     }
-    setModel((prev) => (prev ? { ...prev, ...updates } : prev));
-    return true;
   };
 
   return { model, loading, error, fetchModel, saveModel, updateModel };
 }
 
-// =============================================
-// useUnitTypeModels - read per-type model URLs
-// =============================================
+// =================================================================
+// useUnitTypeModels  (shared library per type)
+// =================================================================
 type UnitTypeModelKey = UnitTypeModel['unit_type'];
 type UnitTypeModelUpsertInput = {
   unit_type: UnitTypeModelKey;
@@ -288,112 +256,73 @@ export function useUnitTypeModels() {
   const fetchUnitTypeModels = useCallback(async () => {
     setLoading(true);
     setError(null);
-
-    const { data, error } = await supabase
-      .from('unit_type_models')
-      .select('*')
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      setError(error.message);
+    try {
+      const res = await api<{ unit_type_models: UnitTypeModel[] }>('GET', '/api/unit-type-models');
+      const rows = res.unit_type_models ?? [];
+      const next: Partial<Record<UnitTypeModelKey, UnitTypeModel>> = {};
+      for (const row of rows) {
+        const key = row.unit_type as UnitTypeModelKey;
+        if (!next[key]) next[key] = row;
+      }
+      setModelsByType(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load type models');
       setModelsByType({});
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const rows = (data ?? []) as UnitTypeModel[];
-    const next: Partial<Record<UnitTypeModelKey, UnitTypeModel>> = {};
-    for (const row of rows) {
-      const key = row.unit_type as UnitTypeModelKey;
-      if (!next[key]) next[key] = row;
-    }
-    setModelsByType(next);
-    setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchUnitTypeModels();
-  }, [fetchUnitTypeModels]);
+  useEffect(() => { fetchUnitTypeModels(); }, [fetchUnitTypeModels]);
 
   const upsertUnitTypeModel = useCallback(
     async (input: UnitTypeModelUpsertInput): Promise<UnitTypeModel | null> => {
       setError(null);
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setError('Authentication required.');
+      try {
+        // Server handles upsert by unit_type
+        const res = await api<{ unit_type_model: UnitTypeModel }>(
+          'POST',
+          '/api/unit-type-models',
+          input,
+        );
+        const row = res.unit_type_model;
+        setModelsByType((prev) => ({ ...prev, [row.unit_type]: row }));
+        return row;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to save type model');
         return null;
       }
-
-      const existing = modelsByType[input.unit_type];
-      const payload: UnitTypeModelInsert = {
-        user_id: user.id,
-        unit_type: input.unit_type,
-        model_glb_url:
-          input.model_glb_url !== undefined ? input.model_glb_url : (existing?.model_glb_url ?? null),
-        external_model_glb_url:
-          input.external_model_glb_url !== undefined
-            ? input.external_model_glb_url
-            : (existing?.external_model_glb_url ?? null),
-        storage_path:
-          input.storage_path !== undefined ? input.storage_path : (existing?.storage_path ?? null),
-      };
-
-      const { data, error } = existing
-        ? await supabase.from('unit_type_models').update(payload).eq('id', existing.id).select().single()
-        : await supabase.from('unit_type_models').insert(payload).select().single();
-
-      if (error) {
-        setError(error.message);
-        return null;
-      }
-
-      const row = data as UnitTypeModel;
-      setModelsByType((prev) => ({ ...prev, [row.unit_type]: row }));
-      return row;
     },
-    [modelsByType]
+    [],
   );
 
   const deleteUnitTypeModel = useCallback(
     async (unitType: UnitTypeModelKey): Promise<boolean> => {
       setError(null);
-
       const existing = modelsByType[unitType];
       if (!existing) return true;
-
-      const { error } = await supabase.from('unit_type_models').delete().eq('id', existing.id);
-      if (error) {
-        setError(error.message);
+      try {
+        await api('DELETE', `/api/unit-type-models/${existing.id}`);
+        setModelsByType((prev) => {
+          const next = { ...prev };
+          delete next[unitType];
+          return next;
+        });
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete type model');
         return false;
       }
-
-      setModelsByType((prev) => {
-        const next = { ...prev };
-        delete next[unitType];
-        return next;
-      });
-      return true;
     },
-    [modelsByType]
+    [modelsByType],
   );
 
-  return {
-    modelsByType,
-    loading,
-    error,
-    fetchUnitTypeModels,
-    upsertUnitTypeModel,
-    deleteUnitTypeModel,
-  };
+  return { modelsByType, loading, error, fetchUnitTypeModels, upsertUnitTypeModel, deleteUnitTypeModel };
 }
 
-// =============================================
-// useUnitGlbModels - per-unit, per-type GLB models
-// =============================================
+// =================================================================
+// useUnitGlbModels  (per-unit, per-type GLB models)
+// =================================================================
 export function useUnitGlbModels(unitId: string) {
   const [byType, setByType] = useState<Partial<Record<UnitType, UnitGlbModel>>>({});
   const [loading, setLoading] = useState(true);
@@ -402,104 +331,84 @@ export function useUnitGlbModels(unitId: string) {
   const fetchGlbModels = useCallback(async () => {
     setLoading(true);
     setError(null);
-
-    const { data, error } = await supabase
-      .from('unit_glb_models')
-      .select('*')
-      .eq('unit_id', unitId);
-
-    if (error) {
-      setError(error.message);
+    try {
+      const res = await api<{ glb_models: UnitGlbModel[] }>('GET', `/api/units/${unitId}/glb-models`);
+      const rows = res.glb_models ?? [];
+      const next: Partial<Record<UnitType, UnitGlbModel>> = {};
+      for (const row of rows) { next[row.unit_type as UnitType] = row; }
+      setByType(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load GLB models');
       setByType({});
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const rows = (data ?? []) as UnitGlbModel[];
-    const next: Partial<Record<UnitType, UnitGlbModel>> = {};
-    for (const row of rows) {
-      next[row.unit_type as UnitType] = row;
-    }
-    setByType(next);
-    setLoading(false);
   }, [unitId]);
 
-  useEffect(() => {
-    fetchGlbModels();
-  }, [fetchGlbModels]);
+  useEffect(() => { fetchGlbModels(); }, [fetchGlbModels]);
 
-  /** Insert or update the GLB record for one unit type. */
   const upsertGlbModel = useCallback(
     async (
       unitType: UnitType,
       fields: { glbUrl?: string | null; storagePath?: string | null; externalGlbUrl?: string | null },
     ): Promise<UnitGlbModel | null> => {
       setError(null);
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        setError('Authentication required.');
-        return null;
-      }
-
       const existing = byType[unitType];
-
-      const payload: UnitGlbModelInsert = {
-        unit_id: unitId,
-        unit_type: unitType,
-        glb_url: fields.glbUrl !== undefined ? fields.glbUrl : (existing?.glb_url ?? null),
-        storage_path: fields.storagePath !== undefined ? fields.storagePath : (existing?.storage_path ?? null),
-        external_glb_url:
-          fields.externalGlbUrl !== undefined ? fields.externalGlbUrl : (existing?.external_glb_url ?? null),
-      };
-
-      const { data, error } = existing
-        ? await supabase
-            .from('unit_glb_models')
-            .update(payload as UnitGlbModelUpdate)
-            .eq('id', existing.id)
-            .select()
-            .single()
-        : await supabase
-            .from('unit_glb_models')
-            .insert({ ...payload, user_id: user.id })
-            .select()
-            .single();
-
-      if (error) {
-        setError(error.message);
-        return null;
+      try {
+        let row: UnitGlbModel;
+        if (existing) {
+          // Only send fields that are explicitly being changed
+          const body: Record<string, unknown> = {};
+          if (fields.glbUrl          !== undefined) body.glb_url          = fields.glbUrl          ?? null;
+          if (fields.storagePath     !== undefined) body.storage_path     = fields.storagePath     ?? null;
+          if (fields.externalGlbUrl  !== undefined) body.external_glb_url = fields.externalGlbUrl  ?? null;
+          const res = await api<{ glb_model: UnitGlbModel }>(
+            'PUT',
+            `/api/unit-glb-models/${existing.id}`,
+            body,
+          );
+          row = res.glb_model;
+        } else {
+          // New row: only include fields that have actual values
+          const body: Record<string, unknown> = { unit_type: unitType };
+          if (fields.glbUrl         != null) body.glb_url          = fields.glbUrl;
+          if (fields.storagePath    != null) body.storage_path     = fields.storagePath;
+          if (fields.externalGlbUrl != null) body.external_glb_url = fields.externalGlbUrl;
+          const res = await api<{ glb_model: UnitGlbModel }>(
+            'POST',
+            `/api/units/${unitId}/glb-models`,
+            body,
+          );
+          row = res.glb_model;
+        }
+        setByType((prev) => ({ ...prev, [unitType]: row }));
+        return row;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to save GLB model';
+        setError(message);
+        throw new Error(message); // re-throw so callers (create/edit screens) can surface the error
       }
-
-      const row = data as UnitGlbModel;
-      setByType((prev) => ({ ...prev, [unitType]: row }));
-      return row;
     },
     [unitId, byType],
   );
 
-  /** Remove the GLB record for one unit type. */
   const deleteGlbModel = useCallback(
     async (unitType: UnitType): Promise<boolean> => {
       setError(null);
-
       const existing = byType[unitType];
       if (!existing) return true;
-
-      const { error } = await supabase.from('unit_glb_models').delete().eq('id', existing.id);
-      if (error) {
-        setError(error.message);
+      try {
+        await api('DELETE', `/api/unit-glb-models/${existing.id}`);
+        setByType((prev) => {
+          const next = { ...prev };
+          delete next[unitType];
+          return next;
+        });
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete GLB model');
         return false;
       }
-
-      setByType((prev) => {
-        const next = { ...prev };
-        delete next[unitType];
-        return next;
-      });
-      return true;
     },
     [byType],
   );
@@ -507,9 +416,10 @@ export function useUnitGlbModels(unitId: string) {
   return { byType, loading, error, fetchGlbModels, upsertGlbModel, deleteGlbModel };
 }
 
-// (unit_floor_tours removed — floor data now stored in units.floors JSONB column)
-
-// Dead export kept as tombstone to avoid import errors elsewhere:
+// =================================================================
+// Floor tours â€” now stored in units.floors; these are no-op stubs
+// kept for import compatibility.
+// =================================================================
 export type FloorTour = {
   id: string;
   unit_id: string;
@@ -519,78 +429,19 @@ export type FloorTour = {
   created_at: string;
 };
 
-/** Standalone helper used by the Create screen (unit_id not known until after insert). */
 export async function saveFloorToursForUnit(
-  unitId: string,
-  urlMap: Record<number, string>,
+  _unitId: string,
+  _urlMap: Record<number, string>,
 ): Promise<void> {
-  const toUpsert = Object.entries(urlMap)
-    .filter(([, url]) => url.trim().length > 0)
-    .map(([fi, url]) => ({
-      unit_id: unitId,
-      floor_index: Number(fi),
-      provider: 'matterport',
-      url: url.trim(),
-    }));
-  if (toUpsert.length > 0) {
-    await supabase
-      .from('unit_floor_tours')
-      .upsert(toUpsert, { onConflict: 'unit_id,floor_index' });
-  }
-  // Bust module-level cache so all useUnitFloorTours consumers re-fetch.
-  invalidateTourCache(unitId);
+  // Floor tour data is now stored in units.floors column.
+  // Call updateUnit() with the floors array directly.
 }
 
-/** Hook for the Edit screen — loads tours and provides a save function. */
-export function useFloorTours(unitId: string) {
-  const [tours, setTours] = useState<FloorTour[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchTours = useCallback(async () => {
-    if (!unitId) { setLoading(false); return; }
-    setLoading(true);
-    const { data } = await supabase
-      .from('unit_floor_tours')
-      .select('*')
-      .eq('unit_id', unitId)
-      .order('floor_index', { ascending: true });
-    setTours((data as FloorTour[]) ?? []);
-    setLoading(false);
-  }, [unitId]);
-
-  useEffect(() => { fetchTours(); }, [fetchTours]);
-
-  const saveTours = useCallback(async (urlMap: Record<number, string>): Promise<void> => {
-    if (!unitId) return;
-    const entries = Object.entries(urlMap).map(([fi, url]) => ({
-      floor_index: Number(fi),
-      url: url.trim(),
-    }));
-    const toUpsert = entries
-      .filter(e => e.url.length > 0)
-      .map(e => ({
-        unit_id: unitId,
-        floor_index: e.floor_index,
-        provider: 'matterport',
-        url: e.url,
-      }));
-    const toDelete = entries.filter(e => e.url.length === 0).map(e => e.floor_index);
-    if (toUpsert.length > 0) {
-      await supabase
-        .from('unit_floor_tours')
-        .upsert(toUpsert, { onConflict: 'unit_id,floor_index' });
-    }
-    if (toDelete.length > 0) {
-      await supabase
-        .from('unit_floor_tours')
-        .delete()
-        .eq('unit_id', unitId)
-        .in('floor_index', toDelete);
-    }
-    // Bust module-level cache so all useUnitFloorTours consumers re-fetch.
-    invalidateTourCache(unitId);
-    await fetchTours();
-  }, [unitId, fetchTours]);
-
-  return { tours, loading, saveTours, refetch: fetchTours };
+export function useFloorTours(_unitId: string) {
+  return {
+    tours: [] as FloorTour[],
+    loading: false,
+    saveTours: async (_urlMap: Record<number, string>) => {},
+    refetch: async () => {},
+  };
 }

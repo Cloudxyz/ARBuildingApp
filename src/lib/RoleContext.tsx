@@ -2,14 +2,12 @@
  * src/lib/RoleContext.tsx
  *
  * Provides the authenticated user's RBAC role to the entire app.
- * Role is fetched once per session change and cached here.
- *
- * Usage:
- *   const { role, isMaster, roleLoading } = useRoleContext();
+ * Role is read from the stored user object (set at login time).
+ * Stays in sync via authEvents pub/sub.
  */
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Session } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { loadUser } from './api';
+import { onAuthChange } from './authEvents';
 
 export type AppRole = 'user' | 'master_admin';
 
@@ -29,39 +27,19 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<AppRole>('user');
   const [roleLoading, setRoleLoading] = useState(true);
 
-  const fetchRole = async (session: Session | null) => {
-    if (!session?.user) {
-      setRole('user');
-      setRoleLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', session.user.id)
-      .maybeSingle();
-
-    if (!error && data?.role === 'master_admin') {
-      setRole('master_admin');
-    } else {
-      setRole('user');
-    }
-    setRoleLoading(false);
-  };
-
   useEffect(() => {
-    // Fetch role for existing session on mount
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      fetchRole(session);
+    // Hydrate role from stored user on mount
+    loadUser().then((user) => {
+      setRole(user?.role === 'master_admin' ? 'master_admin' : 'user');
+      setRoleLoading(false);
     });
 
-    // Re-fetch on sign-in / sign-out / token refresh
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      fetchRole(session);
+    // Keep in sync when sign-in / sign-out happen
+    const unsub = onAuthChange((user) => {
+      setRole(user?.role === 'master_admin' ? 'master_admin' : 'user');
+      setRoleLoading(false);
     });
-
-    return () => listener.subscription.unsubscribe();
+    return unsub;
   }, []);
 
   return (
@@ -74,3 +52,4 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
 export function useRoleContext(): RoleContextValue {
   return useContext(RoleContext);
 }
+

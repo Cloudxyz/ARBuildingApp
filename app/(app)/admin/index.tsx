@@ -8,8 +8,7 @@
  * - Developments: list all developments across all users.
  * - Units: list all units across all users.
  *
- * Data is fetched directly via Supabase. The master_admin RLS overlay
- * policies (Phase 2) ensure all rows are visible.
+ * Data is fetched via the REST API. master_admin role is enforced server-side.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -31,9 +30,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRoleContext, AppRole } from '../../../src/lib/RoleContext';
 import { useAuth } from '../../../src/hooks/useAuth';
 import { useDialog } from '../../../src/lib/dialog';
-import { supabase } from '../../../src/lib/supabase';
+import { api } from '../../../src/lib/api';
 import { Development, Unit } from '../../../src/types';
-import { FunctionsHttpError } from '@supabase/supabase-js';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 const ACCENT  = '#00d4ff';
@@ -51,6 +49,8 @@ interface UserRow {
   id: string;
   email: string;
   full_name: string | null;
+  phone: string | null;
+  country: string | null;
   role: AppRole;
 }
 
@@ -69,17 +69,19 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
 function UserCard({
   user,
   isSelf,
+  onEdit,
   onToggleRole,
   onDelete,
 }: {
   user: UserRow;
   isSelf: boolean;
+  onEdit: () => void;
   onToggleRole: () => void;
   onDelete: () => void;
 }) {
   const isAdmin = user.role === 'master_admin';
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} onPress={onEdit} activeOpacity={0.75}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardName} numberOfLines={1}>
           {user.full_name ?? '(no name)'}{isSelf ? ' (you)' : ''}
@@ -91,6 +93,7 @@ function UserCard({
         </View>
       </View>
       <Text style={styles.cardSub} numberOfLines={1}>{user.email}</Text>
+      {user.phone ? <Text style={styles.cardSub} numberOfLines={1}>{user.phone}</Text> : null}
       <View style={styles.cardFooter}>
         <TouchableOpacity
           style={[styles.actionBtn, isSelf && styles.actionBtnDisabled]}
@@ -109,7 +112,7 @@ function UserCard({
           <Text style={styles.actionBtnText}>DELETE</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -119,7 +122,7 @@ function DevCard({ dev, onDelete }: { dev: Development & { ownerEmail?: string }
       <View style={styles.cardHeader}>
         <Text style={styles.cardName} numberOfLines={1}>{dev.name}</Text>
         <View style={[styles.rolePill, { backgroundColor: 'rgba(0,255,136,0.12)' }]}>
-          <Text style={[styles.rolePillText, { color: GREEN }]}>{dev.type.toUpperCase()}</Text>
+          <Text style={[styles.rolePillText, { color: GREEN }]}>{dev.type}</Text>
         </View>
       </View>
       {dev.ownerEmail ? (
@@ -151,7 +154,7 @@ function UnitCard({ unit, onDelete }: { unit: Unit & { ownerEmail?: string }; on
       {unit.ownerEmail ? (
         <Text style={styles.cardSub} numberOfLines={1}>Owner: {unit.ownerEmail}</Text>
       ) : null}
-      <Text style={[styles.cardSub, { color: statusColor }]}>{unit.status.toUpperCase()}</Text>
+      <Text style={[styles.cardSub, { color: statusColor }]}>{unit.status}</Text>
       <View style={styles.cardFooter}>
         <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDanger]} onPress={onDelete}>
           <Text style={styles.actionBtnText}>DELETE</Text>
@@ -186,6 +189,58 @@ export default function AdminScreen() {
     setCreateVisible(true);
   };
 
+  // ─ Edit User modal state ──────────────────────────────────────────────────
+  const [editVisible, setEditVisible]   = useState(false);
+  const [editLoading, setEditLoading]   = useState(false);
+  const [editUser, setEditUser]         = useState<UserRow | null>(null);
+  const [editEmail, setEditEmail]       = useState('');
+  const [editName, setEditName]         = useState('');
+  const [editPhone, setEditPhone]       = useState('');
+  const [editCountry, setEditCountry]   = useState('');
+  const [editRole, setEditRole]         = useState<AppRole>('user');
+  const [editPass, setEditPass]         = useState('');
+
+  const openEditModal = (user: UserRow) => {
+    setEditUser(user);
+    setEditEmail(user.email);
+    setEditName(user.full_name ?? '');
+    setEditPhone(user.phone ?? '');
+    setEditCountry(user.country ?? '');
+    setEditRole(user.role);
+    setEditPass('');
+    setEditVisible(true);
+  };
+
+  const handleEditUser = useCallback(async () => {
+    if (!editUser) return;
+    const email = editEmail.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await dialog.alert({ title: 'Validation', message: 'Enter a valid email address.' });
+      return;
+    }
+    if (editPass && editPass.length < 8) {
+      await dialog.alert({ title: 'Validation', message: 'New password must be at least 8 characters.' });
+      return;
+    }
+    setEditLoading(true);
+    try {
+      await api('PUT', `/api/admin/users/${editUser.id}`, {
+        email,
+        full_name: editName.trim() || null,
+        phone: editPhone.trim() || null,
+        country: editCountry.trim() || null,
+        role: editRole,
+        ...(editPass ? { password: editPass } : {}),
+      });
+      setEditVisible(false);
+      fetchUsers();
+    } catch (err) {
+      await dialog.alert({ title: 'Error', message: err instanceof Error ? err.message : 'Failed to update user' });
+    } finally {
+      setEditLoading(false);
+    }
+  }, [editUser, editEmail, editName, editPhone, editCountry, editRole, editPass, dialog, fetchUsers]);
+
   const handleCreateUser = useCallback(async () => {
     const email = createEmail.trim().toLowerCase();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -196,46 +251,36 @@ export default function AdminScreen() {
       await dialog.alert({ title: 'Validation', message: 'Password must be at least 8 characters.' });
       return;
     }
+
     setCreateLoading(true);
+    try {
+      // In invite mode, generate a random temporary password
+      const password =
+        createMode === 'temp_password'
+          ? createPass.trim()
+          : Math.random().toString(36).slice(-10) + 'A1!';
 
-    // Explicitly get the session token so the Edge Function always receives it.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (!accessToken) {
-      setCreateLoading(false);
-      await dialog.alert({ title: 'Auth Error', message: 'No active session. Please sign in again.' });
-      return;
-    }
-
-    const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-create-user', {
-      body: {
+      await api('POST', '/api/admin/users', {
         email,
-        full_name:     createName.trim() || undefined,
-        role:          createRole,
-        mode:          createMode,
-        temp_password: createMode === 'temp_password' ? createPass.trim() : undefined,
-      },
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    setCreateLoading(false);
+        password,
+        full_name: createName.trim() || undefined,
+        role: createRole,
+      });
 
-    if (fnError) {
-      let message = fnError.message;
-      if (fnError instanceof FunctionsHttpError) {
-        try { const body = await fnError.context.json(); message = body?.error ?? message; } catch {}
-      }
-      console.error('[admin-create-user] error:', message);
-      await dialog.alert({ title: 'Error', message });
-      return;
+      setCreateVisible(false);
+      await dialog.alert({
+        title: 'Success',
+        message:
+          createMode === 'invite'
+            ? `User ${email} created.\n\nTemporary password: ${password}\n\nShare it securely.`
+            : `User ${email} created with the provided password.`,
+      });
+      fetchUsers();
+    } catch (err) {
+      await dialog.alert({ title: 'Error', message: err instanceof Error ? err.message : 'Failed to create user' });
+    } finally {
+      setCreateLoading(false);
     }
-    setCreateVisible(false);
-    await dialog.alert({
-      title: 'Success',
-      message: createMode === 'invite'
-        ? `Invite sent to ${email}.`
-        : `User ${email} created with temporary password.`,
-    });
-    fetchUsers();
   }, [createEmail, createName, createRole, createMode, createPass, dialog, fetchUsers]);
 
   // ─ Users data ─────────────────────────────────────────────────────────────
@@ -244,30 +289,10 @@ export default function AdminScreen() {
 
   const fetchUsers = useCallback(async () => {
     setUsersLoading(true);
-    // Fetch all profiles
-    const { data: profiles, error: pErr } = await supabase
-      .from('profiles')
-      .select('id, email, full_name')
-      .order('email');
-
-    if (pErr || !profiles) { setUsersLoading(false); return; }
-
-    // Fetch all roles
-    const { data: roles } = await supabase
-      .from('user_roles')
-      .select('user_id, role');
-
-    const roleMap: Record<string, AppRole> = {};
-    for (const r of roles ?? []) roleMap[r.user_id] = r.role as AppRole;
-
-    setUsers(
-      profiles.map((p: { id: string; email: string; full_name: string | null }) => ({
-        id: p.id,
-        email: p.email,
-        full_name: p.full_name,
-        role: roleMap[p.id] ?? 'user',
-      }))
-    );
+    try {
+      const res = await api<{ users: UserRow[] }>('GET', '/api/admin/users');
+      setUsers(res.users ?? []);
+    } catch {}
     setUsersLoading(false);
   }, []);
 
@@ -277,23 +302,16 @@ export default function AdminScreen() {
 
   const fetchDevs = useCallback(async () => {
     setDevsLoading(true);
-    const { data, error } = await supabase
-      .from('developments')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error || !data) { setDevsLoading(false); return; }
-
-    // Attach owner email from profiles
-    const uids = [...new Set((data as Development[]).map((d) => d.user_id))];
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id, email')
-      .in('id', uids);
-    const emailMap: Record<string, string> = {};
-    for (const p of profs ?? []) emailMap[p.id] = p.email;
-
-    setDevs((data as Development[]).map((d) => ({ ...d, ownerEmail: emailMap[d.user_id] })));
+    try {
+      const res = await api<{ developments: (Development & { ownerEmail?: string })[] }>(
+        'GET', '/api/admin/developments'
+      );
+      // API returns created_by_email as ownerEmail alias
+      setDevs((res.developments ?? []).map((d: any) => ({
+        ...d,
+        ownerEmail: d.created_by_email ?? d.ownerEmail,
+      })));
+    } catch {}
     setDevsLoading(false);
   }, []);
 
@@ -303,22 +321,15 @@ export default function AdminScreen() {
 
   const fetchUnits = useCallback(async () => {
     setUnitsLoading(true);
-    const { data, error } = await supabase
-      .from('units')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error || !data) { setUnitsLoading(false); return; }
-
-    const uids = [...new Set((data as Unit[]).map((u) => u.user_id))];
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id, email')
-      .in('id', uids);
-    const emailMap: Record<string, string> = {};
-    for (const p of profs ?? []) emailMap[p.id] = p.email;
-
-    setUnits((data as Unit[]).map((u) => ({ ...u, ownerEmail: emailMap[u.user_id] })));
+    try {
+      const res = await api<{ units: (Unit & { ownerEmail?: string })[] }>(
+        'GET', '/api/admin/units'
+      );
+      setUnits((res.units ?? []).map((u: any) => ({
+        ...u,
+        ownerEmail: u.created_by_email ?? u.ownerEmail,
+      })));
+    } catch {}
     setUnitsLoading(false);
   }, []);
 
@@ -335,42 +346,29 @@ export default function AdminScreen() {
       destructive: nextRole !== 'master_admin',
     });
     if (!ok) return;
-    const { error } = await supabase
-      .from('user_roles')
-      .upsert({ user_id: user.id, role: nextRole }, { onConflict: 'user_id' });
-    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
-    fetchUsers();
+    try {
+      await api('PUT', `/api/admin/users/${user.id}/role`, { role: nextRole });
+      fetchUsers();
+    } catch (err) {
+      await dialog.alert({ title: 'Error', message: err instanceof Error ? err.message : 'Failed to update role' });
+    }
   }, [fetchUsers, dialog]);
 
   // ─ Delete user (hard-delete via Edge Function — removes auth.users row + cascade) ─
   const handleDeleteUser = useCallback(async (user: UserRow) => {
     const ok = await dialog.confirm({
       title: 'Delete User',
-      message: `Permanently delete ${user.email}?\n\nThis removes their auth account and ALL associated data. This cannot be undone.`,
+      message: `Permanently delete ${user.email}?\n\nThis removes their account and ALL associated data. This cannot be undone.`,
       confirmText: 'Delete Permanently',
       destructive: true,
     });
     if (!ok) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData?.session?.access_token;
-    if (!accessToken) {
-      await dialog.alert({ title: 'Auth Error', message: 'No active session. Please sign in again.' });
-      return;
+    try {
+      await api('DELETE', `/api/admin/users/${user.id}`);
+      fetchUsers();
+    } catch (err) {
+      await dialog.alert({ title: 'Error', message: err instanceof Error ? err.message : 'Failed to delete user' });
     }
-    const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-delete-user', {
-      body: { userId: user.id },
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (fnError) {
-      let message = fnError.message;
-      if (fnError instanceof FunctionsHttpError) {
-        try { const body = await fnError.context.json(); message = body?.error ?? message; } catch {}
-      }
-      console.error('[admin-delete-user] error:', message);
-      await dialog.alert({ title: 'Error', message });
-      return;
-    }
-    fetchUsers();
   }, [fetchUsers, dialog]);
 
   // ─ Delete development ─────────────────────────────────────────────────────
@@ -382,9 +380,12 @@ export default function AdminScreen() {
       destructive: true,
     });
     if (!ok) return;
-    const { error } = await supabase.from('developments').delete().eq('id', dev.id);
-    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
-    fetchDevs();
+    try {
+      await api('DELETE', `/api/developments/${dev.id}`);
+      fetchDevs();
+    } catch (err) {
+      await dialog.alert({ title: 'Error', message: err instanceof Error ? err.message : 'Failed to delete development' });
+    }
   }, [fetchDevs, dialog]);
 
   // ─ Delete unit ────────────────────────────────────────────────────────────
@@ -396,9 +397,12 @@ export default function AdminScreen() {
       destructive: true,
     });
     if (!ok) return;
-    const { error } = await supabase.from('units').delete().eq('id', unit.id);
-    if (error) { await dialog.alert({ title: 'Error', message: error.message }); return; }
-    fetchUnits();
+    try {
+      await api('DELETE', `/api/units/${unit.id}`);
+      fetchUnits();
+    } catch (err) {
+      await dialog.alert({ title: 'Error', message: err instanceof Error ? err.message : 'Failed to delete unit' });
+    }
   }, [fetchUnits, dialog]);
 
   // ─ Guard ──────────────────────────────────────────────────────────────────
@@ -431,7 +435,7 @@ export default function AdminScreen() {
               onPress={() => setTab(t)}
             >
               <Text style={[styles.tabBtnText, tab === t && styles.tabBtnTextActive]}>
-                {t.toUpperCase()}
+                {t}
               </Text>
             </TouchableOpacity>
           ))}
@@ -460,6 +464,7 @@ export default function AdminScreen() {
               <UserCard
                 user={item}
                 isSelf={item.id === currentUser?.id}
+                onEdit={() => openEditModal(item)}
                 onToggleRole={() => handleToggleRole(item)}
                 onDelete={() => handleDeleteUser(item)}
               />
@@ -491,6 +496,103 @@ export default function AdminScreen() {
           />
         )}
       </View>
+
+      {/* ── Edit User Modal ───────────────────────────────────────────────── */}
+      <Modal
+        visible={editVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !editLoading && setEditVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView style={styles.modalSheet} keyboardShouldPersistTaps="handled">
+            <Text style={[styles.modalTitle, { marginBottom: 12 }]}>EDIT USER</Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Email *"
+              placeholderTextColor={PLACEHOLDER}
+              value={editEmail}
+              onChangeText={setEditEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={{ height: 10 }} />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Full name"
+              placeholderTextColor={PLACEHOLDER}
+              value={editName}
+              onChangeText={setEditName}
+            />
+            <View style={{ height: 10 }} />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Phone"
+              placeholderTextColor={PLACEHOLDER}
+              value={editPhone}
+              onChangeText={setEditPhone}
+              keyboardType="phone-pad"
+            />
+            <View style={{ height: 10 }} />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Country"
+              placeholderTextColor={PLACEHOLDER}
+              value={editCountry}
+              onChangeText={setEditCountry}
+            />
+            <View style={{ height: 10 }} />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="New password (leave blank to keep current)"
+              placeholderTextColor={PLACEHOLDER}
+              value={editPass}
+              onChangeText={setEditPass}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <Text style={[styles.modalLabel, { marginTop: 12 }]}>ROLE</Text>
+            <View style={[styles.modalToggleRow, { marginTop: 8 }]}>
+              {(['user', 'master_admin'] as AppRole[]).map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  style={[styles.modalToggleBtn, editRole === r && styles.modalToggleBtnActive]}
+                  onPress={() => setEditRole(r)}
+                >
+                  <Text style={[styles.modalToggleBtnText, editRole === r && styles.modalToggleBtnTextActive]}>
+                    {r === 'master_admin' ? 'MASTER ADMIN' : 'USER'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={[styles.modalActions, { marginTop: 16, marginBottom: 24 }]}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                onPress={() => setEditVisible(false)}
+                disabled={editLoading}
+              >
+                <Text style={styles.modalBtnText}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnConfirm]}
+                onPress={handleEditUser}
+                disabled={editLoading}
+              >
+                {editLoading
+                  ? <ActivityIndicator color={BG} size="small" />
+                  : <Text style={[styles.modalBtnText, { color: BG }]}>SAVE</Text>}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* ── Create User Modal ─────────────────────────────────────────────── */}
       <Modal
@@ -548,7 +650,7 @@ export default function AdminScreen() {
                   onPress={() => setCreateMode(m)}
                 >
                   <Text style={[styles.modalToggleBtnText, createMode === m && styles.modalToggleBtnTextActive]}>
-                    {m === 'invite' ? 'SEND INVITE' : 'SET PASSWORD'}
+                    {m === 'invite' ? 'RAND PASSWORD' : 'SET PASSWORD'}
                   </Text>
                 </TouchableOpacity>
               ))}

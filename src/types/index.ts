@@ -1,5 +1,5 @@
 // =============================================
-// Database types — mirrors Supabase schema
+// Database types — REST API schema
 // =============================================
 
 export type UnitStatus = 'available' | 'reserved' | 'sold';
@@ -121,7 +121,7 @@ export type UnitModelInsert = Omit<UnitModel, 'id' | 'user_id' | 'created_at' | 
 export type UnitModelUpdate = Partial<UnitModelInsert>;
 
 // =============================================
-// Supabase Database helper type
+// App Database helper types
 // =============================================
 // Building animation types
 // =============================================
@@ -175,7 +175,7 @@ export interface UnitGlbModel {
   user_id: string;
   unit_type: UnitType;
   glb_url: string | null;           // uploaded file public URL (priority)
-  storage_path: string | null;      // Supabase storage path for uploaded file
+  storage_path: string | null;      // server storage path for uploaded file
   external_glb_url: string | null;  // manual fallback URL
   created_at: string;
   updated_at: string;

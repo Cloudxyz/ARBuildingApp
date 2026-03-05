@@ -8,7 +8,9 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
+import Svg, { Path, Line } from 'react-native-svg';
 import AnimatedPressable from '../../src/components/AnimatedPressable';
 import AnimatedInput from '../../src/components/AnimatedInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +24,16 @@ const FORM_TEXT = '#ffffff';
 const INPUT_BORDER = 'rgba(255,255,255,0.55)';
 const PLACEHOLDER = '#b8c1df';
 
+function EyeIcon({ visible }: { visible: boolean }) {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <Path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+      {!visible && <Line x1="3" y1="3" x2="21" y2="21" />}
+    </Svg>
+  );
+}
+
 export default function RegisterScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
@@ -30,6 +42,8 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
@@ -96,22 +110,32 @@ export default function RegisterScreen() {
             value={email}
             onChangeText={setEmail}
           />
-          <AnimatedInput
-            style={styles.input}
-            placeholder="Password (min. 6 chars)"
-            placeholderTextColor={PLACEHOLDER}
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
-          <AnimatedInput
-            style={styles.input}
-            placeholder="Confirm password"
-            placeholderTextColor={PLACEHOLDER}
-            secureTextEntry
-            value={confirm}
-            onChangeText={setConfirm}
-          />
+          <View style={styles.passWrap}>
+            <AnimatedInput
+              style={[styles.input, styles.passInput]}
+              placeholder="Password (min. 6 chars)"
+              placeholderTextColor={PLACEHOLDER}
+              secureTextEntry={!showPass}
+              value={password}
+              onChangeText={setPassword}
+            />
+            <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPass((v) => !v)}>
+              <EyeIcon visible={showPass} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.passWrap}>
+            <AnimatedInput
+              style={[styles.input, styles.passInput]}
+              placeholder="Confirm password"
+              placeholderTextColor={PLACEHOLDER}
+              secureTextEntry={!showConfirm}
+              value={confirm}
+              onChangeText={setConfirm}
+            />
+            <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowConfirm((v) => !v)}>
+              <EyeIcon visible={showConfirm} />
+            </TouchableOpacity>
+          </View>
 
           <AnimatedPressable
             style={styles.btn}
@@ -148,6 +172,21 @@ const styles = StyleSheet.create({
   brandTitle: { color: '#ffffff', fontSize: 32, fontWeight: '800', marginBottom: 6, textAlign: 'center' },
   brandSub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center' },
   form: { marginBottom: 24, gap: 12 },
+  passWrap: {
+    position: 'relative',
+  },
+  passInput: {
+    paddingRight: 50,
+  },
+  eyeBtn: {
+    position: 'absolute',
+    right: 14,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 4,
+  },
   input: {
     backgroundColor: '#0d0d22',
     borderWidth: 1,

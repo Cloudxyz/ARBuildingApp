@@ -1,10 +1,13 @@
-import { Session, User } from '@supabase/supabase-js';
+/**
+ * useAuth — JWT-based auth replacing Supabase Auth.
+ * Stores token + user in AsyncStorage, emits auth events for RoleContext.
+ */
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { api, setToken, clearAuth, storeUser, loadUser, StoredUser } from '../lib/api';
+import { emitAuthChange, onAuthChange } from '../lib/authEvents';
 
 interface AuthState {
-  session: Session | null;
-  user: User | null;
+  user: StoredUser | null;
   loading: boolean;
 }
 
@@ -13,71 +16,70 @@ export function useAuth(): AuthState & {
   signUp: (email: string, password: string, fullName: string) => Promise<string | null>;
   signOut: () => Promise<void>;
 } {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<StoredUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Wipe the invalid token from AsyncStorage without triggering a network call.
-    // scope:'local' still fires SIGNED_OUT, but our SIGNED_OUT handler below
-    // only sets state — it does NOT call signOut again, so there is no loop.
-    const wipeStaleToken = () => supabase.auth.signOut({ scope: 'local' });
-
-    supabase.auth
-      .getSession()
-      .then(({ data: { session }, error }) => {
-        if (error) {
-          wipeStaleToken(); // SIGNED_OUT handler will set loading:false
-          return;
-        }
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      })
-      .catch(() => {
-        wipeStaleToken();
-      });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'TOKEN_REFRESH_FAILED') {
-        // Background refresh failed — wipe stale token; the resulting SIGNED_OUT
-        // event will clean up state (no recursive loop).
-        wipeStaleToken();
-      } else if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
-        setLoading(false);
-      } else {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
+    // Hydrate from AsyncStorage on mount
+    loadUser().then((stored) => {
+      setUser(stored);
+      setLoading(false);
     });
 
-    return () => listener.subscription.unsubscribe();
+    // Keep in sync when other parts of the app emit auth changes
+    const unsub = onAuthChange((u) => {
+      setUser(u);
+      setLoading(false);
+    });
+    return unsub;
   }, []);
 
   const signIn = async (email: string, password: string): Promise<string | null> => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error?.message ?? null;
+    try {
+      const res = await api<{ token: string; user: StoredUser }>('POST', '/api/auth/login', {
+        email,
+        password,
+      });
+      if (!res.token || !res.user) {
+        throw new Error('Unexpected response from server. Please try again.');
+      }
+      await setToken(res.token);
+      await storeUser(res.user);
+      emitAuthChange(res.user);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Sign in failed';
+    }
   };
 
   const signUp = async (
     email: string,
     password: string,
-    fullName: string
+    fullName: string,
   ): Promise<string | null> => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    return error?.message ?? null;
+    try {
+      const res = await api<{ token: string; user: StoredUser }>('POST', '/api/auth/register', {
+        email,
+        password,
+        full_name: fullName,
+      });
+      if (!res.token || !res.user) {
+        throw new Error('Registration is temporarily unavailable. Please try again later.');
+      }
+      await setToken(res.token);
+      await storeUser(res.user);
+      emitAuthChange(res.user);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Sign up failed';
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await clearAuth();
+    emitAuthChange(null);
   };
 
-  return { session, user, loading, signIn, signUp, signOut };
+  return { user, loading, signIn, signUp, signOut };
 }
+

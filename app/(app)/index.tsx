@@ -51,7 +51,7 @@ function UnitCard({ unit, onPress, onDelete }: { unit: Unit; onPress: () => void
             <Text style={styles.cardMetaText}>{unit.area_sqm.toLocaleString()} m2</Text>
           ) : null}
           <Text style={[styles.statusLabel, { color: statusColor }]}>
-            {unit.status.toUpperCase()}
+            {unit.status}
           </Text>
         </View>
         <View style={styles.cardActions}>
@@ -100,7 +100,7 @@ function DevelopmentCard({
       <View style={styles.cardFooter}>
         <View style={styles.cardMeta}>
           <Text style={[styles.statusLabel, { color: typeColor }]}>
-            {development.type.toUpperCase()}
+            {development.type ?? 'fraccionamiento'}
           </Text>
           <Text style={styles.cardMetaText}>{unitCount} UNITS</Text>
         </View>

@@ -46,7 +46,7 @@ export interface ARBuildingModel {
   stop: () => void;
   reset: () => void;
 
-  // Supabase
+  // Persist
   save: () => Promise<boolean>;
   isSaving: boolean;
 
@@ -73,7 +73,7 @@ export function useARBuildingModel(unitId: string): ARBuildingModel {
   const [config, setConfig] = useState<ARModelConfig>(DEFAULT_AR_CONFIG);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Load from Supabase model (fires when model first loads)
+  // Load config from API model (fires when model first loads)
   useEffect(() => {
     if (!model) return;
     const extra = (model.model_data ?? {}) as Partial<ARModelConfig>;
@@ -177,7 +177,7 @@ export function useARBuildingModel(unitId: string): ARBuildingModel {
     ],
   }));
 
-  // ── Supabase save ────────────────────────────
+  // ── Save to REST API ────────────────────────────
   const save = useCallback(async (): Promise<boolean> => {
     setIsSaving(true);
     const result = await saveModel({

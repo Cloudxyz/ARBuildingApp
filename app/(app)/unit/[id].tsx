@@ -11,7 +11,7 @@ import ScreenLoader from '../../../src/components/ScreenLoader';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import { useDialog } from '../../../src/lib/dialog';
-import { useUnitGlbModels, useUnitModel, useUnits } from '../../../src/hooks/useUnits';
+import { useUnitGlbModels, useUnits } from '../../../src/hooks/useUnits';
 import { normalizeFloors, getFloorsTotalFromArr } from '../../../src/lib/floors';
 import { UnitType, resolveGlbSource } from '../../../src/types';
 
@@ -35,15 +35,14 @@ export default function UnitDetailScreen() {
   const router = useRouter();
   const dialog = useDialog();
   const { units, loading: unitsLoading, error: unitsError, deleteUnit, fetchUnits } = useUnits();
-  const { model, loading: modelLoading } = useUnitModel(id);
-
   const unit = units.find((u) => u.id === id);
-  const { byType: glbByType } = useUnitGlbModels(id);
+  const { byType: glbByType, fetchGlbModels } = useUnitGlbModels(id);
 
   useFocusEffect(
     useCallback(() => {
       fetchUnits();
-    }, [fetchUnits]),
+      fetchGlbModels();
+    }, [fetchUnits, fetchGlbModels]),
   );
 
 
@@ -106,7 +105,7 @@ export default function UnitDetailScreen() {
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
         <View style={[styles.statusBanner, { borderLeftColor: statusColor }]}>
           <Text style={[styles.statusText, { color: statusColor }]}>
-            {unit.status.toUpperCase()}
+            {unit.status}
           </Text>
           {unit.price ? (
             <Text style={styles.priceText}>${unit.price.toLocaleString()}</Text>
@@ -116,7 +115,7 @@ export default function UnitDetailScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>UNIT DETAILS</Text>
           <InfoRow label="Name" value={unit.name} />
-          <InfoRow label="Unit Type" value={unit.unit_type?.toUpperCase()} />
+          <InfoRow label="Unit Type" value={unit.unit_type} />
           <InfoRow label="Area" value={unit.area_sqm ? `${unit.area_sqm.toLocaleString()} m2` : null} />
           <InfoRow label="Floors" value={getFloorsTotalFromArr(normalizeFloors(unit.floors))} />
           {/* Per-type GLB model indicators */}
@@ -135,7 +134,7 @@ export default function UnitDetailScreen() {
                       color: has ? '#00ff88' : '#333355',
                       fontSize: 7, fontFamily: 'monospace',
                     }}>
-                      {t[0].toUpperCase()}
+                      {t[0]}
                     </Text>
                   </View>
                 );
@@ -152,23 +151,6 @@ export default function UnitDetailScreen() {
               <Text style={styles.descText}>{unit.description}</Text>
             </View>
           ) : null}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>AR BUILDING MODEL</Text>
-          {modelLoading ? (
-            <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
-          ) : model ? (
-            <>
-              <InfoRow label="Floors" value={model.floor_count} />
-              <InfoRow label="Type" value={model.building_type} />
-              <InfoRow label="Scale" value={model.scale} />
-              <InfoRow label="Rotation" value={`${model.rotation_deg}deg`} />
-              <InfoRow label="Footprint" value={`${model.footprint_w} x ${model.footprint_h} u`} />
-            </>
-          ) : (
-            <Text style={styles.noModel}>No AR model configured yet. Launch the camera to create one.</Text>
-          )}
         </View>
 
         {hasCoords && (
@@ -266,7 +248,6 @@ const styles = StyleSheet.create({
   infoValue: { color: '#eeeeff', fontSize: 13, fontWeight: '600', maxWidth: '65%', textAlign: 'right' },
   descBox: { marginTop: 8 },
   descText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, lineHeight: 18, marginTop: 4 },
-  noModel: { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontFamily: 'monospace', lineHeight: 18 },
   map: { height: 200, borderRadius: 8, overflow: 'hidden', marginTop: 4 },
   arBtn: {
     backgroundColor: 'transparent',

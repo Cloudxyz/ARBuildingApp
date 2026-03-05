@@ -205,7 +205,7 @@ const GLB_CACHE_MAX = 5;
  * - Keyed by the resolved URI string. For local `require()` assets the URI
  *   is stable within a session (same `file://` path), so the cache is
  *   effective across tab switches and Demo ↔ Unit navigations.
- * - For remote Supabase signed URLs the key is the full URL string; since the
+ * - For remote signed URLs the key is the full URL string; since the
  *   URL is resolved once per screen mount and reused throughout that mount,
  *   the cache avoids re-downloading when the same screen is revisited with the
  *   same signed URL (URL caching at the network layer handles expiry).
